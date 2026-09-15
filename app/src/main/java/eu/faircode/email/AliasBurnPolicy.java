@@ -18,7 +18,8 @@ import java.util.List;
  * evaluated as separate truths.
  *
  * A spam hit alone never authorizes SMTP burn. The alias lifecycle must itself
- * be COMPROMISED/REPLACED before the destructive server action can become ready.
+ * be COMPROMISED/REPLACED and the configured replacement must be verified from
+ * observed legitimate traffic before the destructive server action is ready.
  */
 public final class AliasBurnPolicy {
     private AliasBurnPolicy() {
@@ -37,6 +38,7 @@ public final class AliasBurnPolicy {
         REVIEW_COMPROMISE,
         COMPROMISED,
         ROTATE_FIRST,
+        VERIFY_REPLACEMENT,
         READY_TO_BURN,
         SERVER_PENDING,
         SMTP_DEAD,
@@ -50,6 +52,7 @@ public final class AliasBurnPolicy {
         public boolean serviceDomainKnown;
         public boolean trustedDomainsConfigured;
         public boolean replacementConfigured;
+        public boolean replacementVerified;
         public ServerState serverState = ServerState.NONE;
     }
 
@@ -116,6 +119,11 @@ public final class AliasBurnPolicy {
 
         if (input.replacementConfigured) {
             reasons.add("replacement-configured");
+            if (!input.replacementVerified) {
+                reasons.add("replacement-not-yet-verified");
+                return new Result(Verdict.VERIFY_REPLACEMENT, true, false, reasons);
+            }
+            reasons.add("replacement-verified");
             return new Result(Verdict.READY_TO_BURN, true, true, reasons);
         }
 
