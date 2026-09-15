@@ -12,7 +12,9 @@ package eu.faircode.email;
 import android.content.Context;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Persistent counterpart of SpamFamilyEngine.Model. */
 public final class SpamFamilyStore {
@@ -84,11 +86,27 @@ public final class SpamFamilyStore {
     public static synchronized Match match(Context context,
                                            String accountUuid,
                                            SpamFamilyFingerprint fingerprint) {
+        return matchInternal(context, accountUuid, 0L, fingerprint);
+    }
+
+    /** Match while honoring explicit per-message family exclusions. */
+    public static synchronized Match matchForMessage(Context context,
+                                                     String accountUuid,
+                                                     long messageId,
+                                                     SpamFamilyFingerprint fingerprint) {
+        return matchInternal(context, accountUuid, messageId, fingerprint);
+    }
+
+    private static Match matchInternal(Context context,
+                                       String accountUuid,
+                                       long messageId,
+                                       SpamFamilyFingerprint fingerprint) {
         if (context == null || accountUuid == null || fingerprint == null)
             return new Match(null, SpamFamilyEngine.Score.ZERO, false);
 
-        Best best = findBest(SpamIntelligenceDB.getInstance(context).family(),
-                accountUuid, fingerprint);
+        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
+        Set<Long> excluded = excludedFamilies(dao, accountUuid, messageId);
+        Best best = findBest(dao, accountUuid, fingerprint, excluded);
         return new Match(best.familyId, best.score,
                 best.familyId != null && best.score.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD);
     }
@@ -143,7 +161,8 @@ public final class SpamFamilyStore {
                     scoreSafely(fingerprint, existing.fingerprint));
         }
 
-        Best best = findBest(dao, accountUuid, fingerprint);
+        Best best = findBest(dao, accountUuid, fingerprint,
+                excludedFamilies(dao, accountUuid, messageId));
         long now = System.currentTimeMillis();
         long familyId;
         boolean created;
@@ -170,6 +189,7 @@ public final class SpamFamilyStore {
     /**
      * Explicit user assignment to an existing family. Unlike automatic joining,
      * this never substitutes a different family merely because it scores higher.
+     * Explicit confirmation also cancels an earlier exclusion of that exact pair.
      */
     public static synchronized LearnResult learnSpamIntoFamily(Context context,
                                                                String accountUuid,
@@ -194,6 +214,8 @@ public final class SpamFamilyStore {
             SpamFamilyEngine.Score score = fingerprint == null
                     ? SpamFamilyEngine.Score.ZERO
                     : scoreSafely(fingerprint, existing.fingerprint);
+            if (existing.family_id == requestedFamilyId)
+                dao.deleteExclusion(accountUuid, messageId, requestedFamilyId);
             // A message already exemplifying another family is not silently
             // moved here. Family reassignment deserves an explicit operation.
             return new LearnResult(existing.family_id, false, false, score);
@@ -204,6 +226,7 @@ public final class SpamFamilyStore {
                     SpamFamilyEngine.Score.ZERO);
 
         SpamFamilyEngine.Score previous = bestInFamily(dao, requestedFamilyId, fingerprint);
+        dao.deleteExclusion(accountUuid, messageId, requestedFamilyId);
         return insertExemplar(dao, accountUuid, messageId, fingerprint,
                 requestedFamilyId, false, previous, System.currentTimeMillis());
     }
@@ -268,13 +291,15 @@ public final class SpamFamilyStore {
 
     private static Best findBest(DaoSpamFamily dao,
                                  String accountUuid,
-                                 SpamFamilyFingerprint fingerprint) {
+                                 SpamFamilyFingerprint fingerprint,
+                                 Set<Long> excluded) {
         Long winner = null;
         SpamFamilyEngine.Score best = SpamFamilyEngine.Score.ZERO;
         List<EntitySpamFamily> families = dao.getActiveFamilies(accountUuid);
         if (families != null)
             for (EntitySpamFamily family : families) {
-                if (family == null || family.id == null)
+                if (family == null || family.id == null ||
+                        (excluded != null && excluded.contains(family.id)))
                     continue;
                 SpamFamilyEngine.Score score = bestInFamily(dao, family.id, fingerprint);
                 if (score.value > best.value) {
@@ -283,6 +308,17 @@ public final class SpamFamilyStore {
                 }
             }
         return new Best(winner, best);
+    }
+
+    private static Set<Long> excludedFamilies(DaoSpamFamily dao,
+                                              String accountUuid,
+                                              long messageId) {
+        if (messageId <= 0)
+            return null;
+        List<Long> ids = dao.getExcludedFamilyIds(accountUuid, messageId);
+        if (ids == null || ids.isEmpty())
+            return null;
+        return new HashSet<>(ids);
     }
 
     private static SpamFamilyEngine.Score bestInFamily(DaoSpamFamily dao,
@@ -328,9 +364,10 @@ public final class SpamFamilyStore {
     private static void reconcileFamily(DaoSpamFamily dao, long familyId, long now) {
         int confirmed = dao.countConfirmedMembers(familyId);
         if (confirmed <= 0) {
-            // Predictions are evidence, not foreign keys. Clear them explicitly
+            // Predictions/exclusions are evidence, not foreign keys. Clear them
             // before deleting the model so UI can never point at a dead family.
             dao.clearPredictionsForFamily(familyId, now);
+            dao.deleteExclusionsForFamily(familyId);
             dao.deleteRescoreTasksForFamily(familyId);
             dao.deleteExemplars(familyId);
             dao.deleteFamily(familyId);
