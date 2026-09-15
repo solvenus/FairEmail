@@ -384,7 +384,7 @@ public class ActivitySpamControl extends ActivityBase {
                     "Start", v -> setSection(Section.REVIEW)), matchWrapWithMargin(0, 6, 0, 6));
         if (replacementsMissing > 0)
             llPage.addView(attentionCard(replacementsMissing + " kompromitterte aliaser mangler replacement",
-                    "De kan ikke bli trygt SMTP-døde før du har rotert dem.",
+                    "Replacement anbefales før SMTP-burn, men du kan overstyre dette.",
                     "Åpne", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
         if (!SpamControlPolicy.hasCpanelConfig(this))
             llPage.addView(attentionCard("cPanel er ikke konfigurert",
@@ -688,47 +688,52 @@ public class ActivitySpamControl extends ActivityBase {
 
     private void renderAliases() {
         llPage.addView(sectionTitle("Aliaser"), matchWrap());
-        TextView intro = bodyText("Hele livssyklusen: tjeneste, trusted domains, kompromittering, replacement og SMTP-state.");
+        TextView intro = bodyText("Legitime aliaser og spam-/kompromitterte aliaser holdes i separate arbeidsflater. Uavklarte aliaser ligger for seg selv.");
         intro.setPadding(0, dp(2), 0, dp(8));
         llPage.addView(intro, matchWrap());
 
         EditText search = new EditText(this);
         search.setSingleLine(true);
         search.setHint("Søk alias eller tjeneste");
-        llPage.addView(search, matchWrap());
+        llPage.addView(search, matchWrapWithMargin(0, 0, 0, 10));
 
-        Spinner filter = new Spinner(this);
-        String[] filters = {"Alle", "Aktive", "Kompromitterte", "Erstattet", "Deaktivert", "SMTP-død"};
-        ArrayAdapter<String> filterAdapter = new ArrayAdapter<>(this,
-                android.R.layout.simple_spinner_item, filters);
-        filterAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        filter.setAdapter(filterAdapter);
-        llPage.addView(filter, matchWrapWithMargin(0, 4, 0, 8));
+        LinearLayout spamList = new LinearLayout(this);
+        spamList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout legitList = new LinearLayout(this);
+        legitList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout unresolvedList = new LinearLayout(this);
+        unresolvedList.setOrientation(LinearLayout.VERTICAL);
 
-        LinearLayout list = new LinearLayout(this);
-        list.setOrientation(LinearLayout.VERTICAL);
-        llPage.addView(list, matchWrap());
+        llPage.addView(sectionTitleSmall("Spam / kompromitterte"), matchWrapWithMargin(0, 6, 0, 4));
+        llPage.addView(spamList, matchWrap());
+        llPage.addView(sectionTitleSmall("Legitime"), matchWrapWithMargin(0, 14, 0, 4));
+        llPage.addView(legitList, matchWrap());
+        llPage.addView(sectionTitleSmall("Uavklarte"), matchWrapWithMargin(0, 14, 0, 4));
+        llPage.addView(unresolvedList, matchWrap());
 
-        Runnable repopulate = () -> populateAliasList(list,
-                search.getText().toString(), filter.getSelectedItemPosition());
+        Runnable repopulate = () -> {
+            String query = search.getText().toString();
+            populateAliasBucket(spamList, query, 0,
+                    "Ingen spam-/kompromitterte aliaser matcher søket.");
+            populateAliasBucket(legitList, query, 1,
+                    "Ingen legitime aliaser matcher søket.");
+            populateAliasBucket(unresolvedList, query, 2,
+                    "Ingen uavklarte aliaser matcher søket.");
+        };
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { repopulate.run(); }
             @Override public void afterTextChanged(Editable s) { }
         });
-        filter.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override public void onItemSelected(AdapterView<?> parent, View view, int position, long id) { repopulate.run(); }
-            @Override public void onNothingSelected(AdapterView<?> parent) { }
-        });
         repopulate.run();
     }
 
-    private void populateAliasList(LinearLayout list, String query, int filter) {
+    private void populateAliasBucket(LinearLayout list, String query, int bucket, String emptyText) {
         list.removeAllViews();
         String needle = query == null ? "" : query.trim().toLowerCase(Locale.ROOT);
         int shown = 0;
         for (EntityAlias alias : aliases) {
-            if (alias == null || !aliasMatchesFilter(alias, filter))
+            if (alias == null || aliasBucket(alias) != bucket)
                 continue;
             String hay = (alias.address + " " + empty(alias.service, "") + " " +
                     empty(alias.service_domain, "")).toLowerCase(Locale.ROOT);
@@ -738,21 +743,26 @@ public class ActivitySpamControl extends ActivityBase {
             shown++;
         }
         if (shown == 0)
-            list.addView(bodyText("Ingen aliaser matcher dette filteret."), matchWrap());
+            list.addView(bodyText(emptyText), matchWrap());
     }
 
-    private boolean aliasMatchesFilter(EntityAlias alias, int filter) {
-        if (filter == 0)
-            return true;
-        if (filter == 1)
-            return alias.state == EntityAlias.STATE_ACTIVE;
-        if (filter == 2)
-            return alias.state == EntityAlias.STATE_COMPROMISED;
-        if (filter == 3)
-            return alias.state == EntityAlias.STATE_REPLACED;
-        if (filter == 4)
-            return alias.state == EntityAlias.STATE_DISABLED;
-        return alias.smtp_reject_state == EntityAlias.SMTP_REJECT_VERIFIED;
+    /** 0=spam/problem, 1=legitimate, 2=unresolved. */
+    private int aliasBucket(EntityAlias alias) {
+        int spam = alias.spam_hits == null ? 0 : alias.spam_hits;
+        int ham = alias.ham_hits == null ? 0 : alias.ham_hits;
+        int smtp = alias.smtp_reject_state == null
+                ? EntityAlias.SMTP_REJECT_NONE : alias.smtp_reject_state;
+
+        if (spam > 0 ||
+                alias.state == EntityAlias.STATE_COMPROMISED ||
+                alias.state == EntityAlias.STATE_REPLACED ||
+                smtp != EntityAlias.SMTP_REJECT_NONE)
+            return 0;
+
+        if (alias.state == EntityAlias.STATE_ACTIVE && ham > 0)
+            return 1;
+
+        return 2;
     }
 
     private View aliasCard(EntityAlias alias) {
@@ -787,31 +797,42 @@ public class ActivitySpamControl extends ActivityBase {
             Button restore = secondaryButton("Gjenopprett SMTP");
             restore.setOnClickListener(v -> confirmRestore(alias));
             actions.addView(restore, weightedButton());
-        } else if (readiness.verdict == AliasBurnPolicy.Verdict.REVIEW_COMPROMISE) {
-            Button review = secondaryButton("Vurder alias");
-            review.setOnClickListener(v -> showCompromiseReview(alias));
-            actions.addView(review, weightedButton());
-        } else if (readiness.verdict == AliasBurnPolicy.Verdict.COMPROMISED ||
-                readiness.verdict == AliasBurnPolicy.Verdict.ROTATE_FIRST) {
-            Button replacement = secondaryButton("Sett replacement");
-            replacement.setOnClickListener(v -> showAliasEditor(alias));
-            actions.addView(replacement, weightedButton());
-        } else if (readiness.verdict == AliasBurnPolicy.Verdict.VERIFY_REPLACEMENT) {
-            Button verify = secondaryButton("Skann Innboks");
-            verify.setOnClickListener(v -> runHistoricalScan(true, false));
-            actions.addView(verify, weightedButton());
-        } else if (readiness.burnAllowed) {
-            Button burn = secondaryButton(SpamControlPolicy.hasCpanelConfig(this)
-                    ? "SMTP-død" : "Konfigurer cPanel");
-            burn.setOnClickListener(v -> {
-                if (SpamControlPolicy.hasCpanelConfig(this))
-                    confirmBurn(alias);
-                else
-                    showCpanelDialog();
-            });
-            actions.addView(burn, weightedButton());
+        } else {
+            if (readiness.verdict == AliasBurnPolicy.Verdict.REVIEW_COMPROMISE) {
+                Button review = secondaryButton("Vurder alias");
+                review.setOnClickListener(v -> showCompromiseReview(alias));
+                actions.addView(review, weightedButton());
+            } else if (readiness.verdict == AliasBurnPolicy.Verdict.COMPROMISED ||
+                    readiness.verdict == AliasBurnPolicy.Verdict.ROTATE_FIRST) {
+                Button replacement = secondaryButton("Sett replacement");
+                replacement.setOnClickListener(v -> showAliasEditor(alias));
+                actions.addView(replacement, weightedButton());
+            } else if (readiness.verdict == AliasBurnPolicy.Verdict.VERIFY_REPLACEMENT) {
+                Button verify = secondaryButton("Skann Innboks");
+                verify.setOnClickListener(v -> runHistoricalScan(true, false));
+                actions.addView(verify, weightedButton());
+            }
         }
         body.addView(actions, matchWrap());
+
+        if (alias.smtp_reject_state != EntityAlias.SMTP_REJECT_VERIFIED) {
+            Button burn = secondaryButton(!SpamControlPolicy.smtpBurnEnabled(this)
+                    ? "Aktiver manuell SMTP-burn"
+                    : !SpamControlPolicy.hasCpanelConfig(this)
+                    ? "Konfigurer cPanel for SMTP-burn"
+                    : readiness.burnAllowed ? "SMTP-død" : "SMTP-død likevel");
+            burn.setOnClickListener(v -> {
+                if (!SpamControlPolicy.smtpBurnEnabled(this)) {
+                    SpamControlPolicy.setBoolean(this, SpamControlPolicy.PREF_SMTP_BURN_ENABLED, true);
+                    tvStatus.setText("Manuell SMTP-burn er slått på.");
+                    renderCurrent();
+                } else if (!SpamControlPolicy.hasCpanelConfig(this))
+                    showCpanelDialog();
+                else
+                    confirmBurn(alias);
+            });
+            body.addView(burn, matchWrapWithMargin(0, 6, 0, 0));
+        }
         card.addView(body, matchWrap());
         card.setOnClickListener(v -> showAliasEditor(alias));
         return card;
@@ -914,16 +935,25 @@ public class ActivitySpamControl extends ActivityBase {
             return;
         }
         AliasBurnPolicy.Result readiness = AliasBurnReadiness.evaluate(this, alias);
+        StringBuilder message = new StringBuilder();
+        message.append(alias.address)
+                .append("\n\nServeren skal svare med hard feil ved RCPT TO. ")
+                .append("Spamkontroll verifiserer regelen med read-back før den kalles aktiv.");
         if (!readiness.burnAllowed) {
-            tvStatus.setText("Aliaset er ikke klart for SMTP-burn: " + readiness.verdict);
-            return;
+            message.append("\n\n⚠ ANBEFALING, IKKE LÅS: ")
+                    .append(aliasLifecycleText(alias, readiness));
+            if (TextUtils.isEmpty(alias.replaced_by))
+                message.append("\nReplacement er ikke registrert.");
+            else if (!AliasReplacementVerifier.isVerified(this, alias))
+                message.append("\nReplacement er registrert, men ikke verifisert fra mottatt legitim trafikk.");
+            message.append("\n\nDu kan overstyre dette og burne aliaset nå.");
         }
         new AlertDialog.Builder(this)
-                .setTitle("Gjør alias SMTP-dødt?")
-                .setMessage(alias.address + "\n\nServeren skal svare med hard feil ved RCPT TO. " +
-                        "Spamkontroll verifiserer regelen med read-back før den kalles aktiv.")
+                .setTitle(readiness.burnAllowed ? "Gjør alias SMTP-dødt?" : "Overstyr og gjør alias SMTP-dødt?")
+                .setMessage(message.toString())
                 .setNegativeButton(android.R.string.cancel, null)
-                .setPositiveButton("Gjør SMTP-dødt", (d, w) -> burnAlias(alias))
+                .setPositiveButton(readiness.burnAllowed ? "Gjør SMTP-dødt" : "BURN LIKEVEL",
+                        (d, w) -> burnAlias(alias))
                 .show();
     }
 
@@ -1234,14 +1264,14 @@ public class ActivitySpamControl extends ActivityBase {
             case REVIEW_COMPROMISE:
                 return "Spam finnes, men alias-lekkasje er ikke avgjort.";
             case COMPROMISED:
-                return "Kompromittert. Sett et replacement-alias.";
+                return "Kompromittert. Replacement anbefales før burn; du kan overstyre.";
             case ROTATE_FIRST:
-                return "Bytt alias hos tjenesten og registrer replacement her.";
+                return "Bytt alias anbefales før burn; du kan overstyre.";
             case VERIFY_REPLACEMENT:
-                return "Replacement er satt. Venter på legitim/forventet mail til det nye aliaset.";
+                return "Replacement er registrert, ikke verifisert. Du kan burne nå eller verifisere først.";
             case READY_TO_BURN:
                 return SpamControlPolicy.hasCpanelConfig(this)
-                        ? "Replacement er verifisert. Klar for SMTP-død."
+                        ? "Replacement er verifisert. SMTP-død er klar."
                         : "Replacement er verifisert. Konfigurer cPanel for SMTP-død.";
             case SERVER_PENDING:
                 return "Serveroperasjon pågår.";
