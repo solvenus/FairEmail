@@ -24,6 +24,7 @@ public final class SpamUndoManager {
     public static final String ACTION_RENAME = "RENAME";
     public static final String ACTION_ALIAS_KEEP_ACTIVE = "ALIAS_KEEP_ACTIVE";
     public static final String ACTION_ALIAS_COMPROMISED = "ALIAS_COMPROMISED";
+    public static final String ACTION_ALIAS_STATE = "ALIAS_STATE";
     public static final String ACTION_RESET_ALL = "RESET_ALL";
 
     public enum UndoResult {
@@ -199,16 +200,27 @@ public final class SpamUndoManager {
     }
 
     public static EntitySpamActionHistory latest(Context context, String accountUuid) {
-        return latest(context);
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
+            return null;
+        try {
+            return SpamIntelligenceDB.getInstance(context.getApplicationContext())
+                    .actions().getLatestUndoable(accountUuid.trim());
+        } catch (Throwable ex) {
+            Log.e(ex);
+            return null;
+        }
     }
 
     public static UndoResult undoLatest(Context context, String accountUuid) {
         if (context == null)
             return UndoResult.FAILED;
 
+        if (accountUuid == null || accountUuid.trim().isEmpty())
+            return UndoResult.FAILED;
+
         Context app = context.getApplicationContext();
         SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(app);
-        EntitySpamActionHistory history = db.actions().getLatestUndoable();
+        EntitySpamActionHistory history = db.actions().getLatestUndoable(accountUuid.trim());
         if (history == null || history.id == null || history.before_json == null)
             return UndoResult.NOTHING_TO_UNDO;
 

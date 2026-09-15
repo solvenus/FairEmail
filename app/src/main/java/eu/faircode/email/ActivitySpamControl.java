@@ -1015,24 +1015,53 @@ public class ActivitySpamControl extends ActivityBase {
         tvStatus.setText("Lagrer alias …");
         executor.execute(() -> {
             boolean ok = false;
+            boolean stateChanged = false;
             try {
                 DaoAlias dao = SpamIntelligenceDB.getInstance(getApplicationContext()).alias();
                 EntityAlias fresh = dao.getAlias(account.uuid, address);
                 if (fresh != null) {
+                    int newState = stateFromPosition(statePosition);
+                    int oldState = fresh.state == null ? EntityAlias.STATE_ACTIVE : fresh.state;
+                    stateChanged = oldState != newState;
+
                     fresh.service = cleanNullable(service);
                     fresh.service_domain = cleanNullable(domain);
                     fresh.trusted_domains = csvToJsonArray(trusted);
                     fresh.replaced_by = cleanNullable(replacement);
                     fresh.note = cleanNullable(note);
-                    fresh.state = stateFromPosition(statePosition);
-                    ok = dao.updateAlias(fresh) == 1;
+                    fresh.state = newState;
+
+                    if (stateChanged) {
+                        final EntityAlias target = fresh;
+                        final int targetState = newState;
+                        ok = SpamUndoManager.runAccountAction(
+                                getApplicationContext(), account.uuid,
+                                SpamUndoManager.ACTION_ALIAS_STATE,
+                                "Endre aliasstatus",
+                                () -> {
+                                    boolean updated = dao.updateAlias(target) == 1;
+                                    if (updated && targetState == EntityAlias.STATE_ACTIVE)
+                                        AliasCompromiseReviewStore.markReviewedHealthy(
+                                                getApplicationContext(), target);
+                                    return updated;
+                                });
+                    } else
+                        ok = dao.updateAlias(fresh) == 1;
                     // Sender regex will also be synchronized naturally on next delivery/reply.
                 }
             } catch (Throwable ex) {
                 Log.e(ex);
             }
             final boolean saved = ok;
-            runOnUiThread(() -> tvStatus.setText(saved ? "Alias lagret." : "Kunne ikke lagre alias."));
+            final boolean lifecycleChanged = stateChanged;
+            runOnUiThread(() -> {
+                tvStatus.setText(saved ? "Alias lagret." : "Kunne ikke lagre alias.");
+                if (saved && lifecycleChanged)
+                    Snackbar.make(svContent, "Aliasstatus endret.", Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest()).show();
+                if (saved)
+                    loadDashboardExtras(account);
+            });
         });
     }
 
@@ -1259,7 +1288,7 @@ public class ActivitySpamControl extends ActivityBase {
                 matchWrapWithMargin(0, 0, 0, 7));
 
         llPage.addView(policyCheck("Tillat manuell SMTP-burn",
-                "Viser serverhandlingen når burn-policyen sier READY_TO_BURN. Krever fortsatt bekreftelse og read-back.",
+                "Manuell serverhandling er tilgjengelig når cPanel er konfigurert. Readiness gir anbefalinger, ikke sperrer. Hver burn krever eksplisitt bekreftelse og read-back.",
                 SpamControlPolicy.PREF_SMTP_BURN_ENABLED,
                 SpamControlPolicy.smtpBurnEnabled(this),
                 checked -> SpamControlPolicy.setBoolean(this, SpamControlPolicy.PREF_SMTP_BURN_ENABLED, checked)),

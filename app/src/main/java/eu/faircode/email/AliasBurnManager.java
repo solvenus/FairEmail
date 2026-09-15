@@ -37,8 +37,6 @@ public final class AliasBurnManager {
         EntityAlias entity = dao.getAlias(accountUuid, alias);
         if (entity == null)
             return Outcome.failed("unknown-alias");
-        if (entity.state == EntityAlias.STATE_IGNORED)
-            return Outcome.failed("ignored-alias");
         if (entity.smtp_reject_state == EntityAlias.SMTP_REJECT_VERIFIED)
             return Outcome.verified(false);
 
@@ -47,7 +45,8 @@ public final class AliasBurnManager {
                 : failureMessage.trim();
         long now = System.currentTimeMillis();
 
-        dao.markCompromised(accountUuid, alias);
+        // Explicit SMTP burn changes physical server state only. It must not
+        // invent a semantic reason such as COMPROMISED on the user's behalf.
         dao.markSmtpRejectPending(accountUuid, alias, actuator.provider(), reason, now);
 
         try {
@@ -91,8 +90,8 @@ public final class AliasBurnManager {
             AliasServerActuator.Result result = actuator.restore(alias, entity.smtp_route_snapshot);
             if (result.verified) {
                 dao.clearSmtpReject(accountUuid, alias);
-                // A restored compromised alias stays COMPROMISED. Restoring SMTP
-                // acceptance is not evidence that the leak disappeared.
+                // Restore changes physical SMTP acceptance only. Semantic alias
+                // state stays exactly as the user/learning layer left it.
                 return Outcome.verified(result.changed);
             }
 
