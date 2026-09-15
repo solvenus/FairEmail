@@ -1,0 +1,27 @@
+name: Audit spam_message delete callers
+
+on:
+  push:
+    branches:
+      - audit/spam-control-reset-undo-contract
+    paths:
+      - '.github/workflows/audit-spam-message-delete-callers.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Show every canonical message delete call site
+        run: |
+          set -euo pipefail
+          echo '=== deleteAccount callers ==='
+          git grep -n 'deleteAccount(' -- 'app/src/main/java/**/*.java' || true
+          echo '=== DELETE FROM spam_message ==='
+          git grep -n 'DELETE FROM spam_message' -- 'app/src/main/java/**/*.java' || true
+          echo '=== resetLearning callers ==='
+          git grep -n 'resetLearning(' -- 'app/src/main/java/**/*.java' || true
