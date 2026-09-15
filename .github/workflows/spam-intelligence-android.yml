@@ -68,13 +68,11 @@ jobs:
           chmod 600 "$HOME/.android/debug.keystore"
           printf '%s  %s\n' "$SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256" "$HOME/.android/debug.keystore" | sha256sum -c -
 
-          actual="$(keytool -list -v \
+          keytool_output="$(keytool -list -v \
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
-            -alias androiddebugkey \
-            | sed -n 's/^[[:space:]]*SHA256: //p' \
-            | head -n 1 \
-            | tr -d '\r')"
+            -alias androiddebugkey)"
+          actual="$(awk '/^[[:space:]]*SHA256: / { sub(/^[[:space:]]*SHA256: /, ""); print; exit }' <<< "$keytool_output")"
           test "$actual" = "$SPAM_FAMILIES_DEBUG_CERT_SHA256"
           echo "Pinned debug signing certificate: $actual"
       - name: Grant execute permission for gradlew
@@ -101,15 +99,14 @@ jobs:
           apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$apksigner"
 
-          "$apksigner" verify "$apk"
-          actual="$($apksigner verify --print-certs "$apk" \
-            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
-            | head -n 1 \
-            | tr '[:upper:]' '[:lower:]' \
-            | tr -d ':[:space:]')"
-          expected="$(printf '%s' "$SPAM_FAMILIES_DEBUG_CERT_SHA256" \
-            | tr '[:upper:]' '[:lower:]' \
-            | tr -d ':[:space:]')"
+          cert_output="$($apksigner verify --print-certs "$apk" 2>&1)"
+          printf '%s\n' "$cert_output"
+          actual="$(awk -F': ' '$1 == "Signer #1 certificate SHA-256 digest" { print $2; exit }' <<< "$cert_output")"
+          test -n "$actual"
+          actual="$(tr '[:upper:]' '[:lower:]' <<< "$actual" | tr -d ':[:space:]')"
+          expected="$(tr '[:upper:]' '[:lower:]' <<< "$SPAM_FAMILIES_DEBUG_CERT_SHA256" | tr -d ':[:space:]')"
+          echo "APK signer digest normalized: $actual"
+          echo "Expected digest normalized:   $expected"
           test "$actual" = "$expected"
           echo "Verified APK signing certificate: $SPAM_FAMILIES_DEBUG_CERT_SHA256"
       - name: Prepare checksummed APK artifact
