@@ -1,4 +1,4 @@
-# Gate trigger: exact-family semantics + transactional cPanel route rollback
+# Gate trigger: final cPanel transaction semantics after live integration
 name: Spam Family Core
 
 on:
