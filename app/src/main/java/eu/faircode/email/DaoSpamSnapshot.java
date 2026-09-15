@@ -44,6 +44,9 @@ public interface DaoSpamSnapshot {
     @Query("SELECT * FROM alias WHERE account_uuid = :accountUuid AND address = :address LIMIT 1")
     EntityAlias getAlias(String accountUuid, String address);
 
+    @Query("SELECT * FROM alias WHERE account_uuid = :accountUuid ORDER BY address")
+    List<EntityAlias> getAliases(String accountUuid);
+
     @Query("SELECT * FROM alias ORDER BY account_uuid, address")
     List<EntityAlias> getAllAliases();
 
@@ -51,8 +54,20 @@ public interface DaoSpamSnapshot {
             " WHERE account_uuid = :accountUuid AND message_id = :messageId LIMIT 1")
     EntityAliasDelivery getDelivery(String accountUuid, long messageId);
 
+    @Query("SELECT * FROM alias_delivery WHERE account_uuid = :accountUuid ORDER BY message_id")
+    List<EntityAliasDelivery> getDeliveries(String accountUuid);
+
     @Query("SELECT * FROM alias_delivery ORDER BY account_uuid, message_id")
     List<EntityAliasDelivery> getAllDeliveries();
+
+    @Query("SELECT * FROM spam_meta WHERE key LIKE :prefix || '%' ORDER BY key")
+    List<EntitySpamMeta> getMetaByPrefix(String prefix);
+
+    @Query("DELETE FROM spam_meta WHERE key LIKE :prefix || '%'")
+    int deleteMetaByPrefix(String prefix);
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void putMeta(List<EntitySpamMeta> rows);
 
     @Query("DELETE FROM spam_family_exclusion WHERE account_uuid = :accountUuid")
     int deleteExclusions(String accountUuid);
@@ -138,8 +153,39 @@ public interface DaoSpamSnapshot {
             " last_ham = NULL," +
             " family_counts = '{}'," +
             " state = CASE WHEN state = " + EntityAlias.STATE_COMPROMISED +
+            " THEN " + EntityAlias.STATE_ACTIVE + " ELSE state END" +
+            " WHERE account_uuid = :accountUuid")
+    int resetAccountAliasLearning(String accountUuid);
+
+    @Query("UPDATE alias SET" +
+            " spam_hits = 0," +
+            " ham_hits = 0," +
+            " last_spam = NULL," +
+            " last_ham = NULL," +
+            " family_counts = '{}'," +
+            " state = CASE WHEN state = " + EntityAlias.STATE_COMPROMISED +
             " THEN " + EntityAlias.STATE_ACTIVE + " ELSE state END")
     int resetAllAliasLearning();
+
+    @Query("UPDATE alias_delivery SET" +
+            " label = " + EntityAliasDelivery.LABEL_UNKNOWN + "," +
+            " family_id = NULL," +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_score_raw = NULL," +
+            " family_text = NULL," +
+            " family_structure = NULL," +
+            " family_links = NULL," +
+            " family_sender = NULL," +
+            " family_assessed_at = NULL," +
+            " spam_support = NULL," +
+            " ham_support = NULL," +
+            " traffic_net = NULL," +
+            " traffic_verdict = NULL," +
+            " traffic_reasons = NULL," +
+            " assessed_at = NULL" +
+            " WHERE account_uuid = :accountUuid")
+    int resetAccountDeliveryLearning(String accountUuid);
 
     @Query("UPDATE alias_delivery SET" +
             " label = " + EntityAliasDelivery.LABEL_UNKNOWN + "," +
