@@ -135,6 +135,34 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         };
     }
 
+    /**
+     * Read-only connectivity/authentication diagnostic for the Spam Control UI.
+     * It never calls add_forwarder/delete_forwarder or any other mutation API.
+     */
+    public Diagnostic diagnose(String sampleAddress) {
+        String sample = normalizeAddress(sampleAddress);
+        try {
+            JSONObject root = call("Variables", "get_user_information",
+                    Collections.<String, String>emptyMap());
+            JSONObject result = root.optJSONObject("result");
+            JSONObject data = result == null ? null : result.optJSONObject("data");
+            if (data == null)
+                return Diagnostic.failed("cPanel response missing user information");
+
+            String home = first(data, "HOMEDIR", "homedir", "HOME", "home");
+            if (TextUtils.isEmpty(home))
+                home = null;
+
+            if (sample == null)
+                return Diagnostic.ok(home != null, null, -1, false);
+
+            Probe probe = probe(sample);
+            return Diagnostic.ok(home != null, sample, probe.routes.size(), true);
+        } catch (Throwable ex) {
+            return Diagnostic.failed(diagnosticError(ex));
+        }
+    }
+
     private String homeDirectory() {
         try {
             JSONObject root = call("Variables", "get_user_information",
@@ -359,6 +387,15 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         return null;
     }
 
+    private static String diagnosticError(Throwable ex) {
+        String value = ex == null
+                ? "unknown-error"
+                : ex.getClass().getSimpleName() + ": " + String.valueOf(ex.getMessage());
+        value = value.replaceAll("(?i)(authorization|token|password)\\s*[:=]\\s*[^\\s,;]+", "$1=<redacted>");
+        value = value.replace('\n', ' ').replace('\r', ' ').trim();
+        return value.length() <= 300 ? value : value.substring(0, 300);
+    }
+
     private static boolean isFail(String destination) {
         if (destination == null)
             return false;
@@ -376,6 +413,36 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         if (at <= 0 || at + 1 >= address.length())
             return null;
         return address.substring(at + 1).toLowerCase(Locale.ROOT);
+    }
+
+    public static final class Diagnostic {
+        public final boolean success;
+        public final boolean homeDirectoryKnown;
+        public final String sampleAddress;
+        public final int exactRouteCount;
+        public final boolean forwarderReadTested;
+        public final String error;
+
+        private Diagnostic(boolean success, boolean homeDirectoryKnown,
+                           String sampleAddress, int exactRouteCount,
+                           boolean forwarderReadTested, String error) {
+            this.success = success;
+            this.homeDirectoryKnown = homeDirectoryKnown;
+            this.sampleAddress = sampleAddress;
+            this.exactRouteCount = exactRouteCount;
+            this.forwarderReadTested = forwarderReadTested;
+            this.error = error;
+        }
+
+        static Diagnostic ok(boolean homeDirectoryKnown, String sampleAddress,
+                             int exactRouteCount, boolean forwarderReadTested) {
+            return new Diagnostic(true, homeDirectoryKnown, sampleAddress,
+                    exactRouteCount, forwarderReadTested, null);
+        }
+
+        static Diagnostic failed(String error) {
+            return new Diagnostic(false, false, null, -1, false, error);
+        }
     }
 
     public static final class Config {

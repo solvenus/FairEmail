@@ -1442,6 +1442,10 @@ public class ActivitySpamControl extends ActivityBase {
         Button configure = secondaryButton("Konfigurer cPanel");
         configure.setOnClickListener(v -> showCpanelDialog());
         cb.addView(configure, matchWrapWithMargin(0, 7, 0, 0));
+        Button testCpanel = secondaryButton("Test cPanel (kun lesing)");
+        testCpanel.setEnabled(SpamControlPolicy.hasCpanelConfig(this));
+        testCpanel.setOnClickListener(v -> testCpanelConnection());
+        cb.addView(testCpanel, matchWrapWithMargin(0, 5, 0, 0));
         cpanel.addView(cb, matchWrap());
         llPage.addView(cpanel, matchWrapWithMargin(0, 0, 0, 12));
 
@@ -1696,6 +1700,62 @@ public class ActivitySpamControl extends ActivityBase {
             } else if (SpamControlPolicy.PREF_SHOW_TECHNICAL.equals(key) && section == Section.SETTINGS) {
                 // Takes effect the next time Review renders.
             }
+        });
+    }
+
+    private void testCpanelConnection() {
+        CpanelAliasActuator.Config config = SpamControlPolicy.cpanelConfig(this);
+        if (config == null) {
+            tvStatus.setText("Konfigurer cPanel først.");
+            showCpanelDialog();
+            return;
+        }
+
+        String sample = null;
+        for (EntityAlias alias : aliases)
+            if (alias != null && !TextUtils.isEmpty(alias.address)) {
+                sample = alias.address;
+                break;
+            }
+        final String sampleAddress = sample;
+
+        tvStatus.setText("Tester cPanel med leseoperasjoner …");
+        executor.execute(() -> {
+            CpanelAliasActuator.Diagnostic diagnostic =
+                    new CpanelAliasActuator(config).diagnose(sampleAddress);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed())
+                    return;
+                if (!diagnostic.success) {
+                    tvStatus.setText("cPanel-test feilet: " + diagnostic.error);
+                    new AlertDialog.Builder(this)
+                            .setTitle("cPanel-test feilet")
+                            .setMessage(diagnostic.error)
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                    return;
+                }
+
+                StringBuilder report = new StringBuilder();
+                report.append("Autentisering / UAPI: OK")
+                        .append("\nHome directory tilgjengelig: ")
+                        .append(diagnostic.homeDirectoryKnown ? "ja" : "nei");
+                if (diagnostic.forwarderReadTested)
+                    report.append("\nEmail/list_forwarders: OK")
+                            .append("\nTestalias: ").append(diagnostic.sampleAddress)
+                            .append("\nEksakte eksplisitte routes: ")
+                            .append(diagnostic.exactRouteCount);
+                else
+                    report.append("\nEmail/list_forwarders: ikke testet — ingen aliaser er observert ennå.");
+                report.append("\n\nIngen serverdata ble endret.");
+
+                tvStatus.setText("cPanel-test OK. Ingen serverdata ble endret.");
+                new AlertDialog.Builder(this)
+                        .setTitle("cPanel-test OK")
+                        .setMessage(report.toString())
+                        .setPositiveButton(android.R.string.ok, null)
+                        .show();
+            });
         });
     }
 
