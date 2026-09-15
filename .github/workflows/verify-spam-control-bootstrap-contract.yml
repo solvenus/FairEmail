@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/spam-control-p0
+      - changeset/spam-control-semantic-architecture-v2
       - audit/spam-control-bootstrap-contract
     paths:
       - '.github/scripts/verify_spam_control_bootstrap_contract.py'
