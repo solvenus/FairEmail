@@ -25,7 +25,8 @@ import androidx.room.RoomDatabase;
         version = 1,
         entities = {
                 EntityAlias.class,
-                EntityAliasDelivery.class
+                EntityAliasDelivery.class,
+                EntitySpamMeta.class
         },
         exportSchema = true
 )
