@@ -206,16 +206,16 @@ public final class SpamFamilyStore {
                 !accountUuid.equals(requested.account_uuid))
             return new LearnResult(null, false, false, SpamFamilyEngine.Score.ZERO);
 
-        if (!requested.active)
-            dao.setFamilyActive(requestedFamilyId, true, System.currentTimeMillis());
-
         EntitySpamFamilyExemplar existing = dao.getExemplar(accountUuid, messageId);
         if (existing != null) {
             SpamFamilyEngine.Score score = fingerprint == null
                     ? SpamFamilyEngine.Score.ZERO
                     : scoreSafely(fingerprint, existing.fingerprint);
-            if (existing.family_id == requestedFamilyId)
+            if (existing.family_id == requestedFamilyId) {
+                if (!requested.active)
+                    dao.setFamilyActive(requestedFamilyId, true, System.currentTimeMillis());
                 dao.deleteExclusion(accountUuid, messageId, requestedFamilyId);
+            }
             // A message already exemplifying another family is not silently
             // moved here. Family reassignment deserves an explicit operation.
             return new LearnResult(existing.family_id, false, false, score);
@@ -226,6 +226,8 @@ public final class SpamFamilyStore {
                     SpamFamilyEngine.Score.ZERO);
 
         SpamFamilyEngine.Score previous = bestInFamily(dao, requestedFamilyId, fingerprint);
+        if (!requested.active)
+            dao.setFamilyActive(requestedFamilyId, true, System.currentTimeMillis());
         dao.deleteExclusion(accountUuid, messageId, requestedFamilyId);
         return insertExemplar(dao, accountUuid, messageId, fingerprint,
                 requestedFamilyId, false, previous, System.currentTimeMillis());
@@ -371,8 +373,17 @@ public final class SpamFamilyStore {
             dao.deleteRescoreTasksForFamily(familyId);
             dao.deleteExemplars(familyId);
             dao.deleteFamily(familyId);
-        } else
-            dao.setFamilyStats(familyId, confirmed, now);
+            return;
+        }
+
+        dao.setFamilyStats(familyId, confirmed, now);
+        if (dao.countExemplars(familyId) == 0) {
+            // Keep confirmed historical membership, but a family with no model
+            // must not participate in matching or retroactive rescoring.
+            dao.setFamilyActive(familyId, false, now);
+            dao.clearPredictionsForFamily(familyId, now);
+            dao.deleteRescoreTasksForFamily(familyId);
+        }
     }
 
     private static final class Best {
