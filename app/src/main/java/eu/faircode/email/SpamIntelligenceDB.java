@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 3,
+        version = 4,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
@@ -65,6 +65,19 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_3_4 = new Migration(3, 4) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_state INTEGER NOT NULL DEFAULT 0");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_provider TEXT");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_reason TEXT");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_requested_at INTEGER");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_verified_at INTEGER");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_error TEXT");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_alias_smtp_reject_state ON alias(smtp_reject_state)");
+        }
+    };
+
     public abstract DaoAlias alias();
 
     public static SpamIntelligenceDB getInstance(Context context) {
@@ -79,7 +92,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 context.getApplicationContext(),
                                 SpamIntelligenceDB.class,
                                 DB_NAME)
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                         .build();
                 instance = current;
             }
