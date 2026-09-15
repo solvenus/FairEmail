@@ -25,12 +25,14 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 5,
+        version = 6,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
                 EntitySpamMeta.class,
-                EntitySpamIntent.class
+                EntitySpamIntent.class,
+                EntitySpamFamily.class,
+                EntitySpamFamilyExemplar.class
         },
         exportSchema = true
 )
@@ -97,7 +99,37 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_5_6 = new Migration(5, 6) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS spam_family (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "account_uuid TEXT NOT NULL," +
+                    "name TEXT," +
+                    "active INTEGER NOT NULL," +
+                    "confirmed_count INTEGER NOT NULL," +
+                    "created_at INTEGER NOT NULL," +
+                    "updated_at INTEGER NOT NULL)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_account_uuid ON spam_family(account_uuid)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_account_uuid_active ON spam_family(account_uuid, active)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_updated_at ON spam_family(updated_at)");
+
+            db.execSQL("CREATE TABLE IF NOT EXISTS spam_family_exemplar (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "family_id INTEGER NOT NULL," +
+                    "account_uuid TEXT NOT NULL," +
+                    "source_message_id INTEGER NOT NULL," +
+                    "fingerprint BLOB NOT NULL," +
+                    "created_at INTEGER NOT NULL)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_exemplar_family_id ON spam_family_exemplar(family_id)");
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_spam_family_exemplar_account_uuid_source_message_id" +
+                    " ON spam_family_exemplar(account_uuid, source_message_id)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_exemplar_created_at ON spam_family_exemplar(created_at)");
+        }
+    };
+
     public abstract DaoAlias alias();
+    public abstract DaoSpamFamily family();
 
     public static SpamIntelligenceDB getInstance(Context context) {
         SpamIntelligenceDB current = instance;
@@ -111,7 +143,8 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 context.getApplicationContext(),
                                 SpamIntelligenceDB.class,
                                 DB_NAME)
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
+                                MIGRATION_4_5, MIGRATION_5_6)
                         .build();
                 instance = current;
             }
