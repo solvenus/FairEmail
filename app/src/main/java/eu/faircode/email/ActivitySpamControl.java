@@ -944,7 +944,7 @@ public class ActivitySpamControl extends ActivityBase {
                     .append(aliasLifecycleText(alias, readiness));
             if (TextUtils.isEmpty(alias.replaced_by))
                 message.append("\nReplacement er ikke registrert.");
-            else if (!AliasReplacementVerifier.isVerified(this, alias))
+            else if (readiness.verdict == AliasBurnPolicy.Verdict.VERIFY_REPLACEMENT)
                 message.append("\nReplacement er registrert, men ikke verifisert fra mottatt legitim trafikk.");
             message.append("\n\nDu kan overstyre dette og burne aliaset nå.");
         }
