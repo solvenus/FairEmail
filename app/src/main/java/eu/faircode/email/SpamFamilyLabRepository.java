@@ -78,49 +78,51 @@ public final class SpamFamilyLabRepository {
         String account = accountUuid.trim();
         SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
         boolean includeReviewed = !SpamControlPolicy.hideReviewed(context);
-        List<EntityAliasDelivery> deliveries = intelligence.alias()
-                .getReviewQueue(account, includeReviewed, limit);
-        if (deliveries == null || deliveries.isEmpty())
+        DaoSpamMessage messageDao = intelligence.message();
+        List<EntitySpamMessage> states = messageDao.getReviewQueue(account, includeReviewed, limit);
+        if (states == null || states.isEmpty())
             return Collections.emptyList();
 
         DB mail = DB.getInstance(context);
         DaoAlias aliasDao = intelligence.alias();
-        List<Candidate> result = new ArrayList<>(deliveries.size());
-        for (EntityAliasDelivery delivery : deliveries) {
-            if (delivery == null)
+        List<Candidate> result = new ArrayList<>(states.size());
+        for (EntitySpamMessage original : states) {
+            if (original == null)
                 continue;
+            EntitySpamMessage state = original;
             EntityMessage message = null;
             try {
-                message = mail.message().getMessage(delivery.message_id);
+                message = mail.message().getMessage(state.message_id);
             } catch (Throwable ex) {
                 Log.w(ex);
             }
             if (message == null)
                 continue;
 
-            boolean suspiciousAlias = "SUSPICIOUS".equals(delivery.traffic_verdict);
-            boolean historicalJunk = EntityFolder.JUNK.equals(delivery.folder_type);
+            EntityAliasDelivery delivery = aliasDao.getDelivery(account, state.message_id);
+            boolean suspiciousAlias = delivery != null &&
+                    "SUSPICIOUS".equals(delivery.traffic_verdict);
+            boolean historicalJunk = EntityFolder.JUNK.equals(state.folder_type);
             boolean exactPrediction = false;
-            if (delivery.predicted_family_id != null) {
+            if (state.predicted_family_id != null) {
                 if (SpamControlPolicy.exactFamilyDetection(context)) {
                     SpamFamilyIdentity.Identity identity =
                             SpamFamilyMessageAdapter.identityFromMessage(message);
                     if (identity != null) {
                         SpamFamilyStore.Match exact = SpamFamilyStore.matchIdentity(
-                                context, account, delivery.message_id, identity.key);
+                                context, account, state.message_id, identity.key);
                         exactPrediction = exact.familyId != null &&
-                                exact.familyId.longValue() == delivery.predicted_family_id.longValue();
+                                exact.familyId.longValue() == state.predicted_family_id.longValue();
                     }
                 }
 
                 if (!exactPrediction) {
-                    // Legacy fuzzy predictions are derived cache, never human truth.
-                    // Clear them eagerly so even a historical 100% fuzzy score cannot
-                    // masquerade as an exact sender-name + subject match.
-                    intelligence.family().clearFamilyMatch(
-                            account, delivery.message_id, System.currentTimeMillis());
-                    delivery = aliasDao.getDelivery(account, delivery.message_id);
-                    if (delivery == null)
+                    long now = System.currentTimeMillis();
+                    messageDao.clearPrediction(account, state.message_id, now);
+                    // alias_delivery is only a compatibility/enrichment mirror.
+                    intelligence.family().clearFamilyMatch(account, state.message_id, now);
+                    state = messageDao.get(account, state.message_id);
+                    if (state == null)
                         continue;
                 }
             }
@@ -129,14 +131,17 @@ public final class SpamFamilyLabRepository {
                 continue;
 
             EntityAlias alias = null;
-            try {
-                alias = aliasDao.getAlias(account, delivery.address);
-            } catch (Throwable ex) {
-                Log.w(ex);
+            String aliasAddress = delivery == null ? state.delivered_to : delivery.address;
+            if (aliasAddress != null) {
+                try {
+                    alias = aliasDao.getAlias(account, aliasAddress);
+                } catch (Throwable ex) {
+                    Log.w(ex);
+                }
             }
             Long contextFamily = exactPrediction
-                    ? delivery.predicted_family_id : delivery.family_id;
-            result.add(Candidate.from(delivery, message, alias, contextFamily));
+                    ? state.predicted_family_id : state.family_id;
+            result.add(Candidate.from(state, delivery, message, alias, contextFamily));
         }
         return result;
     }
@@ -152,31 +157,35 @@ public final class SpamFamilyLabRepository {
         int limit = Math.max(1, Math.min(MAX_CANDIDATES, requestedLimit));
         String account = accountUuid.trim();
         SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
-        List<EntityAliasDelivery> deliveries = intelligence.family()
+        List<EntitySpamMessage> states = intelligence.message()
                 .getFamilyCandidates(account, familyId, limit);
-        if (deliveries == null || deliveries.isEmpty())
+        if (states == null || states.isEmpty())
             return Collections.emptyList();
 
         DB mail = DB.getInstance(context);
         DaoAlias aliasDao = intelligence.alias();
-        List<Candidate> result = new ArrayList<>(deliveries.size());
-        for (EntityAliasDelivery delivery : deliveries) {
-            if (delivery == null)
+        List<Candidate> result = new ArrayList<>(states.size());
+        for (EntitySpamMessage state : states) {
+            if (state == null)
                 continue;
             EntityMessage message = null;
             try {
-                message = mail.message().getMessage(delivery.message_id);
+                message = mail.message().getMessage(state.message_id);
             } catch (Throwable ex) {
                 Log.w(ex);
             }
 
+            EntityAliasDelivery delivery = aliasDao.getDelivery(account, state.message_id);
             EntityAlias alias = null;
-            try {
-                alias = aliasDao.getAlias(account, delivery.address);
-            } catch (Throwable ex) {
-                Log.w(ex);
+            String aliasAddress = delivery == null ? state.delivered_to : delivery.address;
+            if (aliasAddress != null) {
+                try {
+                    alias = aliasDao.getAlias(account, aliasAddress);
+                } catch (Throwable ex) {
+                    Log.w(ex);
+                }
             }
-            result.add(Candidate.from(delivery, message, alias, familyId));
+            result.add(Candidate.from(state, delivery, message, alias, familyId));
         }
         return result;
     }
@@ -189,9 +198,9 @@ public final class SpamFamilyLabRepository {
         if (resolved.result != null)
             return resolved.result;
         SpamIntelligence.learnSpam(context, resolved.account, resolved.message, null);
-        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
-                .alias().getDelivery(resolved.account.uuid, messageId);
-        return after != null && after.label == EntityAliasDelivery.LABEL_SPAM
+        EntitySpamMessage after = SpamIntelligenceDB.getInstance(context)
+                .message().get(resolved.account.uuid, messageId);
+        return after != null && after.label == EntitySpamMessage.LABEL_SPAM
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
@@ -208,18 +217,21 @@ public final class SpamFamilyLabRepository {
             return BulkActionResult.error(resolved.result);
 
         SpamIntelligence.learnSpam(context, resolved.account, resolved.message, null);
-        DaoAlias aliasDao = SpamIntelligenceDB.getInstance(context).alias();
-        EntityAliasDelivery after = aliasDao.getDelivery(resolved.account.uuid, messageId);
-        if (after == null || after.label != EntityAliasDelivery.LABEL_SPAM)
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        EntitySpamMessage after = intelligence.message().get(resolved.account.uuid, messageId);
+        if (after == null || after.label != EntitySpamMessage.LABEL_SPAM)
             return BulkActionResult.rejected();
 
+        EntityAliasDelivery aliasRow = intelligence.alias()
+                .getDelivery(resolved.account.uuid, messageId);
+        String seedAlias = aliasRow == null ? after.delivered_to : aliasRow.address;
         if (after.family_id == null)
-            return new BulkActionResult(ActionResult.APPLIED, 1, after.address == null ? 0 : 1);
+            return new BulkActionResult(ActionResult.APPLIED, 1, seedAlias == null ? 0 : 1);
 
         SpamExactBulkPropagator.Result propagated = SpamExactBulkPropagator.propagate(
-                context, resolved.account, resolved.message, after.family_id, after.address);
+                context, resolved.account, resolved.message, after.family_id, seedAlias);
         int messages = Math.max(1, propagated.messages);
-        int aliases = Math.max(after.address == null ? 0 : 1, propagated.aliases);
+        int aliases = Math.max(seedAlias == null ? 0 : 1, propagated.aliases);
         return new BulkActionResult(ActionResult.APPLIED, messages, aliases);
     }
 
@@ -274,9 +286,9 @@ public final class SpamFamilyLabRepository {
             return resolved.result;
 
         SpamIntelligence.learnHam(context, resolved.account, resolved.message);
-        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
-                .alias().getDelivery(resolved.account.uuid, messageId);
-        return after != null && after.label == EntityAliasDelivery.LABEL_HAM
+        EntitySpamMessage after = SpamIntelligenceDB.getInstance(context)
+                .message().get(resolved.account.uuid, messageId);
+        return after != null && after.label == EntitySpamMessage.LABEL_HAM
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
@@ -523,7 +535,8 @@ public final class SpamFamilyLabRepository {
             this.explicitHam = explicitHam;
         }
 
-        private static Candidate from(EntityAliasDelivery delivery,
+        private static Candidate from(EntitySpamMessage state,
+                                      EntityAliasDelivery delivery,
                                       EntityMessage message,
                                       EntityAlias alias,
                                       Long familyId) {
@@ -539,14 +552,14 @@ public final class SpamFamilyLabRepository {
             }
 
             boolean predictedThisFamily = familyId != null &&
-                    delivery.predicted_family_id != null &&
-                    delivery.predicted_family_id.longValue() == familyId.longValue();
-            Double selectedScore = predictedThisFamily ? delivery.family_score : null;
+                    state.predicted_family_id != null &&
+                    state.predicted_family_id.longValue() == familyId.longValue();
+            Double selectedScore = predictedThisFamily ? state.family_score : null;
             double value = selectedScore == null ? -1.0 : selectedScore;
             boolean confirmed = familyId != null &&
-                    delivery.label == EntityAliasDelivery.LABEL_SPAM &&
-                    delivery.family_id != null &&
-                    delivery.family_id.longValue() == familyId.longValue();
+                    state.label == EntitySpamMessage.LABEL_SPAM &&
+                    state.family_id != null &&
+                    state.family_id.longValue() == familyId.longValue();
 
             int aliasSpam = alias == null || alias.spam_hits == null ? 0 : alias.spam_hits;
             int aliasHam = alias == null || alias.ham_hits == null ? 0 : alias.ham_hits;
@@ -554,56 +567,59 @@ public final class SpamFamilyLabRepository {
                     ? EntityAlias.STATE_ACTIVE : alias.state;
 
             SpamDecisionScorer.ExplicitLabel explicitLabel;
-            if (delivery.label == EntityAliasDelivery.LABEL_SPAM)
+            if (state.label == EntitySpamMessage.LABEL_SPAM)
                 explicitLabel = SpamDecisionScorer.ExplicitLabel.SPAM;
-            else if (delivery.label == EntityAliasDelivery.LABEL_HAM)
+            else if (state.label == EntitySpamMessage.LABEL_HAM)
                 explicitLabel = SpamDecisionScorer.ExplicitLabel.HAM;
             else
                 explicitLabel = SpamDecisionScorer.ExplicitLabel.UNKNOWN;
 
+            Double aliasSpamSupport = delivery == null ? null : delivery.spam_support;
+            Double aliasHamSupport = delivery == null ? null : delivery.ham_support;
             SpamDecisionScorer.Result overall = SpamDecisionScorer.score(
                     explicitLabel,
-                    delivery.family_score,
-                    delivery.spam_support == null ? 0.0 : delivery.spam_support,
-                    delivery.ham_support == null ? 0.0 : delivery.ham_support);
+                    state.family_score,
+                    aliasSpamSupport == null ? 0.0 : aliasSpamSupport,
+                    aliasHamSupport == null ? 0.0 : aliasHamSupport);
 
+            String address = delivery == null ? state.delivered_to : delivery.address;
             return new Candidate(
-                    delivery.message_id,
-                    delivery.received,
+                    state.message_id,
+                    state.received,
                     subject,
                     sender,
                     preview,
                     message != null,
-                    delivery.address,
+                    address,
                     alias == null ? null : alias.service,
                     expectedDomains(alias),
                     aliasSpam,
                     aliasHam,
                     aliasState,
-                    delivery.folder_type,
-                    delivery.sender_domain,
-                    delivery.has_unsubscribe,
-                    delivery.label,
-                    delivery.family_id,
-                    delivery.predicted_family_id,
-                    delivery.spam_support,
-                    delivery.ham_support,
-                    delivery.traffic_verdict,
-                    delivery.traffic_reasons,
+                    state.folder_type,
+                    delivery == null ? null : delivery.sender_domain,
+                    delivery != null && delivery.has_unsubscribe,
+                    state.label,
+                    state.family_id,
+                    state.predicted_family_id,
+                    aliasSpamSupport,
+                    aliasHamSupport,
+                    delivery == null ? null : delivery.traffic_verdict,
+                    delivery == null ? null : delivery.traffic_reasons,
                     overall.spamSupport,
                     overall.hamSupport,
                     overall.verdict,
                     overall.reasons,
                     selectedScore,
-                    predictedThisFamily ? delivery.family_score_raw : null,
-                    predictedThisFamily ? delivery.family_text : null,
-                    predictedThisFamily ? delivery.family_structure : null,
-                    predictedThisFamily ? delivery.family_links : null,
-                    predictedThisFamily ? delivery.family_sender : null,
-                    predictedThisFamily ? delivery.family_assessed_at : null,
+                    predictedThisFamily && delivery != null ? delivery.family_score_raw : null,
+                    predictedThisFamily && delivery != null ? delivery.family_text : null,
+                    predictedThisFamily && delivery != null ? delivery.family_structure : null,
+                    predictedThisFamily && delivery != null ? delivery.family_links : null,
+                    predictedThisFamily && delivery != null ? delivery.family_sender : null,
+                    state.family_assessed_at,
                     value >= STRONG_THRESHOLD,
                     confirmed,
-                    delivery.label == EntityAliasDelivery.LABEL_HAM);
+                    state.label == EntitySpamMessage.LABEL_HAM);
         }
     }
 }
