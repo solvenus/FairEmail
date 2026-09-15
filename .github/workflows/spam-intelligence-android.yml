@@ -1,4 +1,4 @@
-# Gate trigger: reply alias Envelope-To v3
+# Gate trigger: real Spam Control dashboard
 name: Spam Intelligence Android Compile
 
 on:
@@ -9,6 +9,7 @@ on:
       - 'app/src/github/AndroidManifest.xml'
       - 'app/src/githubDebug/AndroidManifest.xml'
       - 'app/src/github/java/eu/faircode/email/ApplicationSecure.java'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamControl.java'
       - 'app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java'
       - 'app/src/main/java/eu/faircode/email/FragmentCompose.java'
       - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
@@ -32,6 +33,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/EntityAliasDelivery.java'
       - 'app/src/main/java/eu/faircode/email/EntitySpam*.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
+      - 'app/src/main/java/eu/faircode/email/SpamControlPolicy.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
