@@ -22,15 +22,29 @@ jobs:
           fetch-depth: 0
       - name: Apply prototype minimum
         run: python3 .github/scripts/apply_spam_control_prototype_minimum.py
-      - name: Commit patch
+      - name: Commit patch safely on current branch head
         run: |
           set -euo pipefail
           if git diff --quiet; then
             echo "No changes needed"
             exit 0
           fi
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/eu/faircode/email/ActivitySpamControl.java
           git commit -m "Complete Spam Control prototype minimum"
-          git push origin HEAD:feature/spam-families
+
+          # Other active FairEmail work can move feature/spam-families while this
+          # job is running. Never force-push or overwrite it. Rebase this single
+          # ActivitySpamControl commit onto the newest remote head instead.
+          for attempt in 1 2 3; do
+            git fetch origin feature/spam-families
+            git rebase origin/feature/spam-families
+            if git push origin HEAD:feature/spam-families; then
+              exit 0
+            fi
+            echo "Branch moved during push; retrying safely ($attempt/3)"
+          done
+          echo "Could not fast-forward prototype minimum after 3 retries" >&2
+          exit 1
