@@ -7,6 +7,7 @@ on:
     paths:
       - 'app/src/main/java/eu/faircode/email/SpamFamilyEngine.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java'
+      - 'app/src/main/java/eu/faircode/email/SpamFamilyIdentity.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyPredictionPolicy.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasReputation.java'
@@ -38,6 +39,7 @@ jobs:
             -d build/spam-family-core \
             app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java \
             app/src/main/java/eu/faircode/email/SpamFamilyEngine.java \
+            app/src/main/java/eu/faircode/email/SpamFamilyIdentity.java \
             app/src/main/java/eu/faircode/email/SpamFamilyPredictionPolicy.java \
             app/src/main/java/eu/faircode/email/SpamDecisionScorer.java \
             app/src/main/java/eu/faircode/email/SpamAliasReputation.java \
@@ -48,7 +50,8 @@ jobs:
             tools/spam-family-lab/AliasBurnPolicyLab.java \
             tools/spam-family-lab/SpamFamilySerializationLab.java \
             tools/spam-family-lab/SpamFamilyPredictionPolicyLab.java \
-            tools/spam-family-lab/SpamDecisionScorerLab.java
+            tools/spam-family-lab/SpamDecisionScorerLab.java \
+            tools/spam-family-lab/SpamFamilyIdentityLab.java
       - name: Run spam family lab
         run: |
           set -euo pipefail
@@ -69,3 +72,7 @@ jobs:
         run: |
           set -euo pipefail
           java -cp build/spam-family-core eu.faircode.email.SpamDecisionScorerLab
+      - name: Run exact spam family identity lab
+        run: |
+          set -euo pipefail
+          java -cp build/spam-family-core eu.faircode.email.SpamFamilyIdentityLab
