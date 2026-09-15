@@ -198,18 +198,23 @@ public final class SpamIntelligence {
 
             Long familyId = requestedFamilyId;
             SpamFamilyStore.LearnResult familyLearn = null;
-            if (label == EntityAliasDelivery.LABEL_SPAM && familyId == null) {
+            if (label == EntityAliasDelivery.LABEL_SPAM) {
                 SpamFamilyFingerprint fingerprint = SpamFamilyMessageAdapter.fromMessage(context, message);
-                if (fingerprint != null) {
+                if (requestedFamilyId != null) {
+                    familyLearn = SpamFamilyStore.learnSpamIntoFamily(
+                            context, account.uuid, message.id, fingerprint, requestedFamilyId);
+                    familyId = familyLearn.familyId;
+                } else if (fingerprint != null) {
                     familyLearn = SpamFamilyStore.learnSpam(
                             context, account.uuid, message.id, fingerprint);
                     familyId = familyLearn.familyId;
-                    if (familyLearn.learned)
-                        Log.i("SpamFamily learned family=" + familyId +
-                                " message=" + message.id +
-                                " created=" + familyLearn.created +
-                                " previous=" + familyLearn.previousBest);
                 }
+
+                if (familyLearn != null && familyLearn.learned)
+                    Log.i("SpamFamily learned family=" + familyId +
+                            " message=" + message.id +
+                            " created=" + familyLearn.created +
+                            " previous=" + familyLearn.previousBest);
             }
 
             boolean changed = SpamAliasStore.setLabel(
