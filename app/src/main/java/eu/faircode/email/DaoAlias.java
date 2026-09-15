@@ -113,4 +113,10 @@ public interface DaoAlias {
 
     @Query("DELETE FROM alias_delivery WHERE account_uuid = :accountUuid")
     int deleteDeliveries(String accountUuid);
+
+    @Query("SELECT long_value FROM spam_meta WHERE `key` = :key LIMIT 1")
+    Long getMetaLong(String key);
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void putMeta(EntitySpamMeta meta);
 }
