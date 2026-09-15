@@ -1,4 +1,4 @@
-# Gate trigger: read-only spam-group message inspection
+# Gate trigger: active inactive spam groups + truthful cPanel diagnostic
 name: Spam Intelligence Android Compile
 
 on:
