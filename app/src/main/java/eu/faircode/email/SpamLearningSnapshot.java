@@ -68,6 +68,9 @@ final class SpamLearningSnapshot {
                         AliasCompromiseReviewStore.accountMetaPrefix(account))));
 
                 if (messageId > 0) {
+                    EntitySpamMessage spamMessage = dao.getSpamMessage(account, messageId);
+                    if (spamMessage != null)
+                        root.put("spam_message", spamMessageToJson(spamMessage));
                     EntityAliasDelivery delivery = dao.getDelivery(account, messageId);
                     if (delivery != null) {
                         root.put("delivery", deliveryToJson(delivery));
@@ -111,6 +114,14 @@ final class SpamLearningSnapshot {
                 root.put("compromise_meta", metaToJson(dao.getMetaByPrefix(
                         AliasCompromiseReviewStore.accountMetaPrefix(account))));
 
+                JSONArray spamMessages = new JSONArray();
+                List<EntitySpamMessage> spamMessageRows = dao.getSpamMessages(account);
+                if (spamMessageRows != null)
+                    for (EntitySpamMessage row : spamMessageRows)
+                        if (row != null)
+                            spamMessages.put(spamMessageToJson(row));
+                root.put("spam_messages", spamMessages);
+
                 JSONArray deliveries = new JSONArray();
                 List<EntityAliasDelivery> deliveryRows = dao.getDeliveries(account);
                 if (deliveryRows != null)
@@ -151,6 +162,14 @@ final class SpamLearningSnapshot {
                         SpamFamilyIdentity.globalMetaPrefix())));
                 root.put("compromise_meta", metaToJson(dao.getMetaByPrefix(
                         AliasCompromiseReviewStore.globalMetaPrefix())));
+
+                JSONArray spamMessages = new JSONArray();
+                List<EntitySpamMessage> spamMessageRows = dao.getAllSpamMessages();
+                if (spamMessageRows != null)
+                    for (EntitySpamMessage row : spamMessageRows)
+                        if (row != null)
+                            spamMessages.put(spamMessageToJson(row));
+                root.put("spam_messages", spamMessages);
 
                 JSONArray deliveries = new JSONArray();
                 List<EntityAliasDelivery> deliveryRows = dao.getAllDeliveries();
@@ -199,6 +218,7 @@ final class SpamLearningSnapshot {
                     dao.deleteExemplars(account);
                     dao.deleteFamilies(account);
                     dao.clearPredictions(account);
+                    dao.clearSpamMessagePredictions(account);
                     if (root.has("meta"))
                         dao.deleteMetaByPrefix(SpamFamilyIdentity.accountMetaPrefix(account));
                     if (root.has("compromise_meta"))
@@ -225,8 +245,14 @@ final class SpamLearningSnapshot {
                         dao.putMeta(compromiseMeta);
 
                     if (root.optBoolean("full_account_learning", false)) {
+                        dao.resetAccountSpamMessageLearning(account);
                         dao.resetAccountDeliveryLearning(account);
                         dao.resetAccountAliasLearning(account);
+
+                        JSONArray spamMessages = root.optJSONArray("spam_messages");
+                        if (spamMessages != null)
+                            for (int i = 0; i < spamMessages.length(); i++)
+                                restoreSpamMessage(dao, spamMessages.getJSONObject(i));
 
                         JSONArray deliveries = root.optJSONArray("deliveries");
                         if (deliveries != null)
@@ -238,6 +264,9 @@ final class SpamLearningSnapshot {
                             for (int i = 0; i < aliases.length(); i++)
                                 restoreAlias(dao, aliases.getJSONObject(i));
                     } else {
+                        JSONObject spamMessage = root.optJSONObject("spam_message");
+                        if (spamMessage != null)
+                            restoreSpamMessage(dao, spamMessage);
                         JSONObject delivery = root.optJSONObject("delivery");
                         if (delivery != null)
                             restoreDelivery(dao, delivery);
@@ -255,6 +284,7 @@ final class SpamLearningSnapshot {
                         dao.deleteMetaByPrefix(SpamFamilyIdentity.globalMetaPrefix());
                     if (root.has("compromise_meta"))
                         dao.deleteMetaByPrefix(AliasCompromiseReviewStore.globalMetaPrefix());
+                    dao.resetAllSpamMessageLearning();
                     dao.resetAllDeliveryLearning();
                     dao.resetAllAliasLearning();
 
@@ -277,6 +307,16 @@ final class SpamLearningSnapshot {
                         dao.putMeta(meta);
                     if (!compromiseMeta.isEmpty())
                         dao.putMeta(compromiseMeta);
+
+                    JSONArray spamMessages = root.optJSONArray("spam_messages");
+                    if (spamMessages != null)
+                        for (int i = 0; i < spamMessages.length(); i++) {
+                            JSONObject row = spamMessages.getJSONObject(i);
+                            restoreSpamMessage(dao, row);
+                            String account = row.optString("account_uuid", null);
+                            if (account != null)
+                                accounts.add(account);
+                        }
 
                     JSONArray deliveries = root.getJSONArray("deliveries");
                     for (int i = 0; i < deliveries.length(); i++) {
@@ -324,11 +364,37 @@ final class SpamLearningSnapshot {
                 dao.deleteAllFamilies();
                 dao.deleteMetaByPrefix(SpamFamilyIdentity.globalMetaPrefix());
                 dao.deleteMetaByPrefix(AliasCompromiseReviewStore.globalMetaPrefix());
+                dao.resetAllSpamMessageLearning();
                 dao.resetAllDeliveryLearning();
                 dao.resetAllAliasLearning();
                 return true;
             }
         });
+    }
+
+    private static JSONObject spamMessageToJson(EntitySpamMessage row) throws Exception {
+        JSONObject o = new JSONObject();
+        o.put("account_uuid", row.account_uuid);
+        o.put("message_id", row.message_id);
+        o.put("label", row.label);
+        put(o, "family_id", row.family_id);
+        put(o, "predicted_family_id", row.predicted_family_id);
+        if (row.family_score != null)
+            o.put("family_score", row.family_score);
+        put(o, "family_assessed_at", row.family_assessed_at);
+        return o;
+    }
+
+    private static void restoreSpamMessage(DaoSpamSnapshot dao, JSONObject o) throws Exception {
+        dao.restoreSpamMessageLearning(
+                o.getString("account_uuid"),
+                o.getLong("message_id"),
+                o.optInt("label", EntitySpamMessage.LABEL_UNKNOWN),
+                optLong(o, "family_id"),
+                optLong(o, "predicted_family_id"),
+                o.has("family_score") && !o.isNull("family_score")
+                        ? o.getDouble("family_score") : null,
+                optLong(o, "family_assessed_at"));
     }
 
     private static JSONArray metaToJson(List<EntitySpamMeta> rows) throws Exception {
