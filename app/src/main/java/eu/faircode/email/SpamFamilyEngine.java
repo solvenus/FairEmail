@@ -17,8 +17,8 @@ import java.util.Set;
 
 /** Online, explainable grouping and matching of fingerprints learned from known spam. */
 public final class SpamFamilyEngine {
-    public static final double DEFAULT_JOIN_THRESHOLD = 0.56;
-    public static final double DEFAULT_DETECT_THRESHOLD = 0.62;
+    public static final double DEFAULT_JOIN_THRESHOLD = 0.50;
+    public static final double DEFAULT_DETECT_THRESHOLD = 0.56;
     public static final int DEFAULT_MAX_EXEMPLARS = 32;
 
     private SpamFamilyEngine() {
