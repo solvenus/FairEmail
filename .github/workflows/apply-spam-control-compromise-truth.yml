@@ -1,0 +1,42 @@
+name: Apply Spam Control compromise truth
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_spam_control_compromise_truth.py'
+      - '.github/workflows/apply-spam-control-compromise-truth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed compromise truth patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_spam_control_compromise_truth.py
+          git diff --check
+          git status --short
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/AliasBurnPolicy.java \
+                  app/src/main/java/eu/faircode/email/AliasBurnReadiness.java \
+                  app/src/main/java/eu/faircode/email/SpamIntelligence.java \
+                  app/src/main/java/eu/faircode/email/SpamControlAttentionStats.java \
+                  tools/spam-family-lab/AliasBurnPolicyLab.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Keep spam truth separate from alias compromise truth"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
