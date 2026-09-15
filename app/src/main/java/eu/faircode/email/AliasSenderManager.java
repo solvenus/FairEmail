@@ -107,8 +107,10 @@ public final class AliasSenderManager {
         String previousManaged = aliases.getMetaText(metaKey);
         String current = identity.sender_extra_regex;
 
-        // Existing unowned configuration belongs to the user.
-        if (previousManaged == null && !TextUtils.isEmpty(current))
+        // Any pre-existing unowned sender-extra configuration belongs to the user,
+        // including FairEmail's unrestricted sender-extra mode with an empty regex.
+        if (previousManaged == null &&
+                (Boolean.TRUE.equals(identity.sender_extra) || !TextUtils.isEmpty(current)))
             return false;
 
         // If a previously managed identity was edited or disabled manually,
