@@ -22,6 +22,7 @@ import java.util.List;
 import java.util.Set;
 
 import javax.mail.Address;
+import javax.mail.internet.InternetAddress;
 
 /** Read/write facade for the human-facing Spam Control UI. */
 public final class SpamFamilyLabRepository {
@@ -45,6 +46,49 @@ public final class SpamFamilyLabRepository {
             return null;
         return SpamIntelligenceDB.getInstance(context).family()
                 .liveFamilyOverview(accountUuid.trim(), STRONG_THRESHOLD);
+    }
+
+    /** Must be called off the Android main thread. */
+    public static List<Candidate> getReviewQueue(Context context,
+                                                  String accountUuid,
+                                                  int requestedLimit) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
+            return Collections.emptyList();
+        int limit = Math.max(1, Math.min(MAX_CANDIDATES, requestedLimit));
+        String account = accountUuid.trim();
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        boolean includeReviewed = !SpamControlPolicy.hideReviewed(context);
+        List<EntityAliasDelivery> deliveries = intelligence.alias()
+                .getReviewQueue(account, includeReviewed, limit);
+        if (deliveries == null || deliveries.isEmpty())
+            return Collections.emptyList();
+
+        DB mail = DB.getInstance(context);
+        DaoAlias aliasDao = intelligence.alias();
+        List<Candidate> result = new ArrayList<>(deliveries.size());
+        for (EntityAliasDelivery delivery : deliveries) {
+            if (delivery == null)
+                continue;
+            EntityMessage message = null;
+            try {
+                message = mail.message().getMessage(delivery.message_id);
+            } catch (Throwable ex) {
+                Log.w(ex);
+            }
+            if (message == null)
+                continue;
+
+            EntityAlias alias = null;
+            try {
+                alias = aliasDao.getAlias(account, delivery.address);
+            } catch (Throwable ex) {
+                Log.w(ex);
+            }
+            Long contextFamily = delivery.predicted_family_id != null
+                    ? delivery.predicted_family_id : delivery.family_id;
+            result.add(Candidate.from(delivery, message, alias, contextFamily));
+        }
+        return result;
     }
 
     /** Must be called off the Android main thread. */
@@ -87,6 +131,20 @@ public final class SpamFamilyLabRepository {
         return result;
     }
 
+    /** Human statement: this message is spam. Exact identity chooses the family. */
+    public static ActionResult markSpam(Context context,
+                                        String accountUuid,
+                                        long messageId) {
+        Resolved resolved = resolve(context, accountUuid, messageId);
+        if (resolved.result != null)
+            return resolved.result;
+        SpamIntelligence.learnSpam(context, resolved.account, resolved.message, null);
+        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
+                .alias().getDelivery(resolved.account.uuid, messageId);
+        return after != null && after.label == EntityAliasDelivery.LABEL_SPAM
+                ? ActionResult.APPLIED : ActionResult.REJECTED;
+    }
+
     /** Explicitly confirm this locally available message as spam in this exact group. */
     public static ActionResult confirmSpam(Context context,
                                            String accountUuid,
@@ -122,7 +180,6 @@ public final class SpamFamilyLabRepository {
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
-    /** Human statement: this is spam, but it belongs to a different spam group. */
     public static ActionResult markOtherSpam(Context context,
                                              String accountUuid,
                                              long currentFamilyId,
@@ -131,7 +188,6 @@ public final class SpamFamilyLabRepository {
                 context, accountUuid, currentFamilyId, messageId);
     }
 
-    /** Explicit HAM correction. This means the message is not spam. */
     public static ActionResult markLegitimate(Context context,
                                               String accountUuid,
                                               long messageId) {
@@ -146,7 +202,6 @@ public final class SpamFamilyLabRepository {
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
-    /** Internal exact-group exclusion, kept for diagnostics and advanced correction paths. */
     public static ActionResult excludeFromFamily(Context context,
                                                  String accountUuid,
                                                  long familyId,
@@ -186,6 +241,37 @@ public final class SpamFamilyLabRepository {
 
     public static void requestRescore(Context context, String accountUuid, long familyId) {
         SpamFamilyRescorer.enqueue(context, accountUuid, familyId);
+    }
+
+    /** Human-readable representative identity for family administration. Off-main-thread only. */
+    public static String describeFamily(Context context, long familyId) {
+        if (context == null || familyId <= 0)
+            return null;
+        try {
+            List<EntitySpamFamilyExemplar> exemplars = SpamIntelligenceDB.getInstance(context)
+                    .family().getExemplars(familyId);
+            if (exemplars == null)
+                return null;
+            DB mail = DB.getInstance(context);
+            for (EntitySpamFamilyExemplar exemplar : exemplars) {
+                if (exemplar == null)
+                    continue;
+                EntityMessage message = mail.message().getMessage(exemplar.source_message_id);
+                if (message == null)
+                    continue;
+                String senderName = null;
+                Address[] from = message.from;
+                if (from != null && from.length > 0 && from[0] instanceof InternetAddress)
+                    senderName = ((InternetAddress) from[0]).getPersonal();
+                if (senderName == null)
+                    senderName = "(uten avsendernavn)";
+                String subject = message.subject == null ? "(uten emne)" : message.subject;
+                return senderName + "\n" + subject;
+            }
+        } catch (Throwable ex) {
+            Log.w(ex);
+        }
+        return null;
     }
 
     private static Resolved resolve(Context context, String accountUuid, long messageId) {
@@ -362,7 +448,7 @@ public final class SpamFamilyLabRepository {
         private static Candidate from(EntityAliasDelivery delivery,
                                       EntityMessage message,
                                       EntityAlias alias,
-                                      long familyId) {
+                                      Long familyId) {
             String sender = null;
             String subject = null;
             String preview = null;
@@ -374,12 +460,15 @@ public final class SpamFamilyLabRepository {
                     sender = from[0].toString();
             }
 
-            boolean predictedThisFamily = delivery.predicted_family_id != null &&
-                    delivery.predicted_family_id == familyId;
+            boolean predictedThisFamily = familyId != null &&
+                    delivery.predicted_family_id != null &&
+                    delivery.predicted_family_id.longValue() == familyId.longValue();
             Double selectedScore = predictedThisFamily ? delivery.family_score : null;
             double value = selectedScore == null ? -1.0 : selectedScore;
-            boolean confirmed = delivery.label == EntityAliasDelivery.LABEL_SPAM &&
-                    delivery.family_id != null && delivery.family_id == familyId;
+            boolean confirmed = familyId != null &&
+                    delivery.label == EntityAliasDelivery.LABEL_SPAM &&
+                    delivery.family_id != null &&
+                    delivery.family_id.longValue() == familyId.longValue();
 
             int aliasSpam = alias == null || alias.spam_hits == null ? 0 : alias.spam_hits;
             int aliasHam = alias == null || alias.ham_hits == null ? 0 : alias.ham_hits;
