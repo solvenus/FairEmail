@@ -8,6 +8,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamFamilyEngine.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyPredictionPolicy.java'
+      - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasReputation.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficScorer.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
@@ -38,6 +39,7 @@ jobs:
             app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java \
             app/src/main/java/eu/faircode/email/SpamFamilyEngine.java \
             app/src/main/java/eu/faircode/email/SpamFamilyPredictionPolicy.java \
+            app/src/main/java/eu/faircode/email/SpamDecisionScorer.java \
             app/src/main/java/eu/faircode/email/SpamAliasReputation.java \
             app/src/main/java/eu/faircode/email/AliasTrafficScorer.java \
             app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java \
@@ -45,7 +47,8 @@ jobs:
             tools/spam-family-lab/SpamFamilyLab.java \
             tools/spam-family-lab/AliasBurnPolicyLab.java \
             tools/spam-family-lab/SpamFamilySerializationLab.java \
-            tools/spam-family-lab/SpamFamilyPredictionPolicyLab.java
+            tools/spam-family-lab/SpamFamilyPredictionPolicyLab.java \
+            tools/spam-family-lab/SpamDecisionScorerLab.java
       - name: Run spam family lab
         run: |
           set -euo pipefail
@@ -62,3 +65,7 @@ jobs:
         run: |
           set -euo pipefail
           java -cp build/spam-family-core eu.faircode.email.SpamFamilyPredictionPolicyLab
+      - name: Run combined spam decision lab
+        run: |
+          set -euo pipefail
+          java -cp build/spam-family-core eu.faircode.email.SpamDecisionScorerLab
