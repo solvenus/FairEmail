@@ -1131,19 +1131,49 @@ public class ActivitySpamControl extends ActivityBase {
     }
 
     private void burnAlias(EntityAlias alias) {
+        burnAlias(alias, false);
+    }
+
+    private void burnAlias(EntityAlias alias, boolean allowUnsafe) {
         EntityAccount account = selectedAccount;
         CpanelAliasActuator.Config config = SpamControlPolicy.cpanelConfig(this);
         if (account == null || config == null)
             return;
-        tvStatus.setText("Oppretter og verifiserer SMTP hard-fail …");
+        tvStatus.setText(allowUnsafe
+                ? "Overstyrer rollback-kravet og oppretter SMTP hard-fail …"
+                : "Oppretter og verifiserer SMTP hard-fail …");
         executor.execute(() -> {
             AliasBurnManager.Outcome outcome = AliasBurnManager.burn(
                     getApplicationContext(), account.uuid, alias.address,
-                    new CpanelAliasActuator(config), AliasBurnManager.DEFAULT_FAILURE_MESSAGE);
-            runOnUiThread(() -> tvStatus.setText(outcome.success
-                    ? "SMTP hard-fail er verifisert for " + alias.address
-                    : "SMTP-burn feilet: " + outcome.error));
+                    new CpanelAliasActuator(config, allowUnsafe),
+                    AliasBurnManager.DEFAULT_FAILURE_MESSAGE);
+            runOnUiThread(() -> {
+                if (!isSelected(account))
+                    return;
+                if (!outcome.success && !allowUnsafe &&
+                        outcome.error != null && outcome.error.startsWith("unsafe-required:")) {
+                    tvStatus.setText("Eksisterende cPanel-routing kan ikke garanteres gjenopprettet automatisk.");
+                    showUnsafeBurnDialog(alias, outcome.error.substring("unsafe-required:".length()));
+                } else
+                    tvStatus.setText(outcome.success
+                            ? "SMTP hard-fail er verifisert for " + alias.address
+                            : "SMTP-burn feilet: " + outcome.error);
+                loadDashboardExtras(account);
+                renderCurrent();
+            });
         });
+    }
+
+    private void showUnsafeBurnDialog(EntityAlias alias, String reason) {
+        new AlertDialog.Builder(this)
+                .setTitle("Burn uten automatisk rollback?")
+                .setMessage(alias.address +
+                        "\n\nDen eksisterende cPanel-ruten kan slettes, men Spamkontroll kan ikke bevise at samme rute kan rekonstrueres automatisk etterpå." +
+                        "\n\nÅrsak: " + empty(reason, "ukjent route") +
+                        "\n\nHvis du fortsetter, forsøker Spamkontroll fortsatt read-back av hard-fail. Ved en feil etter at gammel routing er slettet kan automatisk rollback være umulig.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("BURN UTEN ROLLBACK", (d, w) -> burnAlias(alias, true))
+                .show();
     }
 
     private void confirmRestore(EntityAlias alias) {
@@ -1169,9 +1199,15 @@ public class ActivitySpamControl extends ActivityBase {
             AliasBurnManager.Outcome outcome = AliasBurnManager.restore(
                     getApplicationContext(), account.uuid, alias.address,
                     new CpanelAliasActuator(config));
-            runOnUiThread(() -> tvStatus.setText(outcome.success
-                    ? "SMTP-mottak er verifisert gjenopprettet."
-                    : "Gjenoppretting feilet: " + outcome.error));
+            runOnUiThread(() -> {
+                if (!isSelected(account))
+                    return;
+                tvStatus.setText(outcome.success
+                        ? "SMTP-mottak er verifisert gjenopprettet."
+                        : "Gjenoppretting feilet: " + outcome.error);
+                loadDashboardExtras(account);
+                renderCurrent();
+            });
         });
     }
 

@@ -33,22 +33,27 @@ import java.util.TreeMap;
 /**
  * cPanel UAPI implementation of AliasServerActuator.
  *
- * V1 only mutates aliases that have no explicit non-fail forwarders. This is
- * deliberately conservative: an alias handled by catch-all/default routing can
- * safely gain an exact :fail: route without destroying a pre-existing route.
- * Explicit route replacement/restore is deferred until exercised against the
- * user's real cPanel server and version.
+ * Explicit routes are replaced through CpanelForwarderTransaction. The default
+ * mode only mutates route sets that can be reconstructed and rolled back. An
+ * explicit user veto can enable unsafe burn; that mode never pretends rollback
+ * is available for route syntax we cannot reproduce.
  */
 public final class CpanelAliasActuator implements AliasServerActuator {
     private static final int CONNECT_TIMEOUT = 15_000;
     private static final int READ_TIMEOUT = 20_000;
 
     private final Config config;
+    private final boolean allowUnsafeBurn;
 
     public CpanelAliasActuator(Config config) {
+        this(config, false);
+    }
+
+    public CpanelAliasActuator(Config config, boolean allowUnsafeBurn) {
         if (config == null)
             throw new IllegalArgumentException("config");
         this.config = config;
+        this.allowUnsafeBurn = allowUnsafeBurn;
     }
 
     @Override
@@ -61,35 +66,23 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         String normalized = normalizeAddress(address);
         if (normalized == null)
             return Result.failed(null, "invalid-address");
-
-        String domain = domain(normalized);
-        if (domain == null)
+        if (domain(normalized) == null)
             return Result.failed(null, "invalid-domain");
 
-        Probe before = probe(normalized);
-        String snapshot = snapshot(normalized, before.routes);
+        String home = homeDirectory();
+        CpanelForwarderTransaction.Result transaction = CpanelForwarderTransaction.burn(
+                backend(normalized), normalized, failureMessage, home, allowUnsafeBurn);
+        String snapshot = transaction.before.isEmpty() &&
+                transaction.error != null && transaction.error.startsWith("preflight-list-failed:")
+                ? null : snapshot(normalized, destinations(normalized, transaction.before));
 
-        if (before.rejected)
-            return Result.verified(false, snapshot);
+        if (transaction.success)
+            return Result.verified(transaction.changed, snapshot);
 
-        // Do not destroy or compete with an existing explicit route in V1.
-        if (!before.routes.isEmpty())
-            return Result.failed(snapshot, "explicit-forwarders-present");
-
-        Map<String, String> args = new TreeMap<>();
-        args.put("domain", domain);
-        args.put("email", normalized);
-        args.put("fwdopt", "fail");
-        args.put("failmsgs", TextUtils.isEmpty(failureMessage)
-                ? "No such person at this address"
-                : failureMessage);
-        call("Email", "add_forwarder", args);
-
-        Probe after = probe(normalized);
-        if (!after.rejected)
-            return Result.failed(snapshot, "read-back-missing-fail-route");
-
-        return Result.verified(true, snapshot);
+        String error = transaction.error;
+        if (transaction.unsafeRequired)
+            error = "unsafe-required:" + error;
+        return Result.failed(snapshot, error);
     }
 
     @Override
@@ -102,34 +95,71 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         if (snapshot == null || !normalized.equalsIgnoreCase(snapshot.address))
             return Result.failed(routeSnapshot, "invalid-route-snapshot");
 
-        // V1 restoration is safe only for an alias that previously relied on
-        // catch-all/default routing and therefore had no explicit routes.
-        if (!snapshot.routes.isEmpty())
-            return Result.failed(routeSnapshot, "restore-explicit-routes-not-supported-v1");
+        List<String> target = new ArrayList<>();
+        for (Route route : snapshot.routes)
+            target.add(route.destination);
 
-        Probe current = probe(normalized);
-        if (current.routes.isEmpty())
-            return Result.verified(false, routeSnapshot);
+        CpanelForwarderTransaction.Result transaction = CpanelForwarderTransaction.restore(
+                backend(normalized), normalized, target, homeDirectory(), false);
+        if (transaction.success)
+            return Result.verified(transaction.changed, routeSnapshot);
+        return Result.failed(routeSnapshot,
+                transaction.unsafeRequired
+                        ? "restore-unsafe-route:" + transaction.error
+                        : transaction.error);
+    }
 
-        for (Route route : current.routes)
-            if (!route.fail)
-                return Result.failed(routeSnapshot, "unexpected-non-fail-route-present");
+    private CpanelForwarderTransaction.Backend backend(final String address) {
+        return new CpanelForwarderTransaction.Backend() {
+            @Override
+            public List<String> list() throws Exception {
+                Probe probe = CpanelAliasActuator.this.probe(address);
+                List<String> result = new ArrayList<>();
+                for (Route route : probe.routes)
+                    result.add(route.destination);
+                return result;
+            }
 
-        for (Route route : current.routes) {
-            Map<String, String> args = new TreeMap<>();
-            // Current UAPI names. We use the exact destination returned by
-            // list_forwarders rather than synthesizing a potentially different
-            // representation of the :fail: route.
-            args.put("address", normalized);
-            args.put("forwarder", route.destination);
-            call("Email", "delete_forwarder", args);
+            @Override
+            public void delete(String destination) throws Exception {
+                Map<String, String> args = new TreeMap<>();
+                args.put("address", address);
+                args.put("forwarder", destination);
+                call("Email", "delete_forwarder", args);
+            }
+
+            @Override
+            public void add(Map<String, String> arguments) throws Exception {
+                call("Email", "add_forwarder", arguments);
+            }
+        };
+    }
+
+    private String homeDirectory() {
+        try {
+            JSONObject root = call("Variables", "get_user_information",
+                    Collections.<String, String>emptyMap());
+            JSONObject result = root.optJSONObject("result");
+            JSONObject data = result == null ? null : result.optJSONObject("data");
+            if (data == null)
+                return null;
+            return first(data, "HOMEDIR", "homedir", "HOME", "home");
+        } catch (Throwable ex) {
+            // Home directory is only needed to prove absolute pipe routes
+            // round-trippable. Unknown home therefore downgrades those routes
+            // to explicit unsafe-veto instead of guessing a server path.
+            Log.w(ex);
+            return null;
         }
+    }
 
-        Probe after = probe(normalized);
-        if (!after.routes.isEmpty())
-            return Result.failed(routeSnapshot, "read-back-route-still-present");
-
-        return Result.verified(true, routeSnapshot);
+    private static List<Route> destinations(String address, List<String> destinations) {
+        List<Route> routes = new ArrayList<>();
+        if (destinations != null)
+            for (String destination : destinations)
+                if (!TextUtils.isEmpty(destination))
+                    routes.add(new Route(address, destination.trim(), isFail(destination)));
+        return routes;
     }
 
     /** Read-only remote inspection used by burn/restore and later UI diagnostics. */
