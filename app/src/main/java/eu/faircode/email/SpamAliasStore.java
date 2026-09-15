@@ -23,8 +23,19 @@ public final class SpamAliasStore {
     private SpamAliasStore() {
     }
 
+    public static boolean observeDelivery(Context context,
+                                          String accountUuid,
+                                          long messageId,
+                                          String deliveredTo,
+                                          long received,
+                                          String folderType) {
+        return observeDelivery(context, accountUuid, messageId, deliveredTo,
+                received, folderType, null, false);
+    }
+
     /**
-     * Record a received message exactly once.
+     * Record a received message exactly once while allowing later observations
+     * of the same FairEmail message to enrich metadata without double counting.
      *
      * @return true only when this message created a new delivery observation.
      */
@@ -33,7 +44,9 @@ public final class SpamAliasStore {
                                           long messageId,
                                           String deliveredTo,
                                           long received,
-                                          String folderType) {
+                                          String folderType,
+                                          String senderDomain,
+                                          boolean hasUnsubscribe) {
         final String account = normalizeAccount(accountUuid);
         final String address = AliasRegistry.normalizeAddress(deliveredTo);
         if (context == null || account == null || address == null || messageId <= 0)
@@ -41,6 +54,7 @@ public final class SpamAliasStore {
 
         final long timestamp = received > 0 ? received : System.currentTimeMillis();
         final String folder = normalizeToken(folderType);
+        final String sender = normalizeDomain(senderDomain);
         final SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(context);
 
         return db.runInTransaction(new Callable<Boolean>() {
@@ -55,6 +69,20 @@ public final class SpamAliasStore {
                                 existing.folder_type, folder);
                         dao.setDeliveryFolder(account, messageId, folder);
                     }
+
+                    String effectiveSender = existing.sender_domain;
+                    if (sender != null && !Objects.equals(existing.sender_domain, sender)) {
+                        changeDomainCount(dao, account, existing.address,
+                                existing.sender_domain, sender);
+                        effectiveSender = sender;
+                        maybeInferServiceDomain(dao, account, existing.address, sender);
+                    }
+
+                    boolean effectiveUnsubscribe = existing.has_unsubscribe || hasUnsubscribe;
+                    if (!Objects.equals(existing.sender_domain, effectiveSender) ||
+                            existing.has_unsubscribe != effectiveUnsubscribe)
+                        dao.setDeliveryEvidence(account, messageId,
+                                effectiveSender, effectiveUnsubscribe);
                     return false;
                 }
 
@@ -66,6 +94,8 @@ public final class SpamAliasStore {
                     alias.service = AliasRegistry.inferServiceName(address);
                     alias.first_seen = timestamp;
                     alias.last_seen = timestamp;
+                    if (sender != null)
+                        alias.service_domain = AliasDomainAffinity.inferServiceDomain(address, sender);
                     dao.insertAlias(alias);
                 }
 
@@ -75,6 +105,8 @@ public final class SpamAliasStore {
                 delivery.address = address;
                 delivery.received = timestamp;
                 delivery.folder_type = folder;
+                delivery.sender_domain = sender;
+                delivery.has_unsubscribe = hasUnsubscribe;
 
                 long inserted = dao.insertDelivery(delivery);
                 if (inserted == -1)
@@ -82,6 +114,10 @@ public final class SpamAliasStore {
 
                 dao.observeDelivery(account, address, timestamp);
                 changeFolderCount(dao, account, address, null, folder);
+                if (sender != null) {
+                    changeDomainCount(dao, account, address, null, sender);
+                    maybeInferServiceDomain(dao, account, address, sender);
+                }
                 return true;
             }
         });
@@ -171,6 +207,38 @@ public final class SpamAliasStore {
         return newValue - oldValue;
     }
 
+    private static void maybeInferServiceDomain(DaoAlias dao,
+                                                String account,
+                                                String address,
+                                                String senderDomain) {
+        EntityAlias alias = dao.getAlias(account, address);
+        if (alias == null || alias.service_domain != null)
+            return;
+        String inferred = AliasDomainAffinity.inferServiceDomain(address, senderDomain);
+        if (inferred != null)
+            dao.setServiceDomain(account, address, inferred);
+    }
+
+    private static void changeDomainCount(DaoAlias dao,
+                                          String account,
+                                          String address,
+                                          String oldDomain,
+                                          String newDomain) throws JSONException {
+        if (Objects.equals(oldDomain, newDomain))
+            return;
+
+        EntityAlias alias = dao.getAlias(account, address);
+        if (alias == null)
+            return;
+
+        String counts = alias.observed_domains;
+        if (oldDomain != null)
+            counts = AliasDomainAffinity.incrementDomainCounter(counts, oldDomain, -1);
+        if (newDomain != null)
+            counts = AliasDomainAffinity.incrementDomainCounter(counts, newDomain, 1);
+        dao.setObservedDomains(account, address, counts);
+    }
+
     private static void changeFolderCount(DaoAlias dao,
                                           String account,
                                           String address,
@@ -224,6 +292,13 @@ public final class SpamAliasStore {
             return null;
         String account = value.trim();
         return account.isEmpty() ? null : account;
+    }
+
+    private static String normalizeDomain(String value) {
+        if (value == null)
+            return null;
+        String domain = value.trim().toLowerCase(Locale.ROOT);
+        return domain.isEmpty() ? null : domain;
     }
 
     private static String normalizeToken(String value) {
