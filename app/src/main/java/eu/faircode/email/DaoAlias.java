@@ -64,6 +64,14 @@ public interface DaoAlias {
     int adjustLabels(String accountUuid, String address,
                      int spamDelta, int hamDelta, long received);
 
+    @Query("UPDATE alias SET folder_counts = :folderCounts" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setFolderCounts(String accountUuid, String address, String folderCounts);
+
+    @Query("UPDATE alias SET family_counts = :familyCounts" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setFamilyCounts(String accountUuid, String address, String familyCounts);
+
     @Query("UPDATE alias SET state = :state" +
             " WHERE account_uuid = :accountUuid AND address = :address")
     int setState(String accountUuid, String address, int state);
