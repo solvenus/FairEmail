@@ -56,7 +56,6 @@ public final class AliasTrafficAnalyzer {
                     account.uuid, evidence.alias, sender, EntityAliasDelivery.LABEL_HAM);
 
             int labelled = spam + ham;
-            // Shrink alias risk toward a low prior until there is enough explicit evidence.
             double aliasSpamRisk = (spam + 0.10 * 6.0) / (labelled + 6.0);
             double labelConfidence = labelled / (labelled + ALIAS_CONFIDENCE_SAMPLES);
             aliasSpamRisk = 0.10 + labelConfidence * (aliasSpamRisk - 0.10);
@@ -67,8 +66,9 @@ public final class AliasTrafficAnalyzer {
                     (senderHam + DOMAIN_CONFIDENCE_SAMPLES);
             double aliasHamConfidence = ham /
                     (ham + ALIAS_CONFIDENCE_SAMPLES);
-            double unexpectedSender = sender == null ? 0 :
-                    aliasHamConfidence * (1.0 - senderHamConfidence);
+            double unexpectedSender = SpamControlPolicy.foreignSenderEvidence(context) && sender != null
+                    ? aliasHamConfidence * (1.0 - senderHamConfidence)
+                    : 0.0;
 
             AliasTrafficScorer.Input input = new AliasTrafficScorer.Input();
             input.senderDomainKnown = sender != null;
