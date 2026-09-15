@@ -11,6 +11,7 @@ package eu.faircode.email;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -121,6 +122,30 @@ public final class SpamAliasStore {
                 return true;
             }
         });
+    }
+
+    /** Persist the explainable traffic assessment snapshot for one delivery. */
+    public static boolean setAssessment(Context context,
+                                        String accountUuid,
+                                        long messageId,
+                                        AliasTrafficScorer.Assessment assessment) {
+        final String account = normalizeAccount(accountUuid);
+        if (context == null || account == null || messageId <= 0 || assessment == null)
+            return false;
+
+        JSONArray reasons = new JSONArray();
+        for (String reason : assessment.reasons)
+            reasons.put(reason);
+
+        return SpamIntelligenceDB.getInstance(context).alias().setDeliveryAssessment(
+                account,
+                messageId,
+                assessment.spamSupport,
+                assessment.hamSupport,
+                assessment.net,
+                assessment.verdict.name(),
+                reasons.toString(),
+                System.currentTimeMillis()) > 0;
     }
 
     /**
