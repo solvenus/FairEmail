@@ -20,23 +20,26 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '=== ActivitySpamFamilyLab references ==='
+          echo '=== Runtime ActivitySpamFamilyLab references ==='
           git grep -n -F 'ActivitySpamFamilyLab' -- app/src || true
           echo
-          echo '=== markSameSpam callers ==='
+          echo '=== Runtime markSameSpam callers ==='
           git grep -n -F 'markSameSpam(' -- app/src || true
           echo
-          echo '=== markOtherSpam callers ==='
+          echo '=== Runtime markOtherSpam callers ==='
           git grep -n -F 'markOtherSpam(' -- app/src || true
           echo
-          echo '=== confirmSpam callers ==='
+          echo '=== Runtime confirmSpam callers ==='
           git grep -n -F 'confirmSpam(' -- app/src || true
           echo
-          echo '=== excludeFromFamily callers ==='
+          echo '=== Runtime excludeFromFamily callers ==='
           git grep -n -F 'excludeFromFamily(' -- app/src || true
           echo
-          echo '=== SpamFamilyReassigner references ==='
+          echo '=== Runtime SpamFamilyReassigner references ==='
           git grep -n -F 'SpamFamilyReassigner' -- app/src || true
+          echo
+          echo '=== Runtime SpamFamilyHumanActions references ==='
+          git grep -n -F 'SpamFamilyHumanActions' -- app/src || true
           echo
           echo '=== SAME_SPAM / OTHER_SPAM action references ==='
           git grep -n -E 'ACTION_(SAME_SPAM|OTHER_SPAM)' -- app/src || true
@@ -46,3 +49,20 @@ jobs:
           echo
           echo '=== Intent/class-name launches mentioning Spam Family Lab ==='
           git grep -n -E 'Intent\([^\n]*ActivitySpamFamilyLab|setClass[^\n]*ActivitySpamFamilyLab|ActivitySpamFamilyLab\.class' -- app/src || true
+          echo
+          echo '=== Whole-repository dependencies on legacy correction symbols ==='
+          for token in \
+            'ActivitySpamFamilyLab' \
+            'SpamFamilyHumanActions' \
+            'SpamFamilyReassigner' \
+            'ACTION_SAME_SPAM' \
+            'ACTION_OTHER_SPAM'; do
+            echo "--- $token ---"
+            git grep -n -F "$token" -- . || true
+          done
+          echo
+          echo '=== Whole-repository direct method references ==='
+          for token in 'confirmSpam(' 'markOtherSpam(' 'excludeFromFamily('; do
+            echo "--- $token ---"
+            git grep -n -F "$token" -- . || true
+          done
