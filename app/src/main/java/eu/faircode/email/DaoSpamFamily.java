@@ -66,6 +66,9 @@ public interface DaoSpamFamily {
     @Query("DELETE FROM spam_family_exemplar WHERE id = :id")
     int deleteExemplar(long id);
 
+    @Query("DELETE FROM spam_family_exemplar WHERE family_id = :familyId")
+    int deleteExemplars(long familyId);
+
     @Query("DELETE FROM spam_family_exemplar" +
             " WHERE account_uuid = :accountUuid AND source_message_id = :messageId")
     int deleteExemplarByMessage(String accountUuid, long messageId);
