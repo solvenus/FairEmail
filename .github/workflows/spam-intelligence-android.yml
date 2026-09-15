@@ -1,4 +1,4 @@
-# Gate trigger: read-only cPanel diagnostic + four alias buckets
+# Gate trigger: read-only spam-group message inspection
 name: Spam Intelligence Android Compile
 
 on:
