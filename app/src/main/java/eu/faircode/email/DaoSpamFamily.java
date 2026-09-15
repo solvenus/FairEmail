@@ -113,6 +113,12 @@ public interface DaoSpamFamily {
             " WHERE account_uuid = :accountUuid AND source_message_id = :messageId")
     int deleteExemplarByMessage(String accountUuid, long messageId);
 
+    @Query("UPDATE spam_family_exemplar SET" +
+            " family_id = :familyId," +
+            " created_at = :createdAt" +
+            " WHERE id = :exemplarId")
+    int moveExemplar(long exemplarId, long familyId, long createdAt);
+
     @Query("SELECT COUNT(*) FROM spam_family_exemplar WHERE family_id = :familyId")
     int countExemplars(long familyId);
 
