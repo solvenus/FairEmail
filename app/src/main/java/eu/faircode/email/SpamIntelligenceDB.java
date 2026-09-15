@@ -74,6 +74,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
             db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_requested_at INTEGER");
             db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_verified_at INTEGER");
             db.execSQL("ALTER TABLE alias ADD COLUMN smtp_reject_error TEXT");
+            db.execSQL("ALTER TABLE alias ADD COLUMN smtp_route_snapshot TEXT");
             db.execSQL("CREATE INDEX IF NOT EXISTS index_alias_smtp_reject_state ON alias(smtp_reject_state)");
         }
     };
