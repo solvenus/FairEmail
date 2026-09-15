@@ -13,10 +13,7 @@ import android.content.Context;
 
 import java.util.Locale;
 
-/**
- * Narrow integration facade between FairEmail and the custom intelligence
- * subsystem. Mail synchronization should only need to call this facade.
- */
+/** Narrow integration facade between FairEmail and the custom intelligence subsystem. */
 public final class SpamIntelligence {
     private SpamIntelligence() {
     }
@@ -66,13 +63,12 @@ public final class SpamIntelligence {
                     evidence.senderDomain,
                     evidence.unsubscribe);
 
-            // Observer-only evidence. No automatic move/delete is allowed here.
             refreshAssessment(context, account, message, true);
             refreshFamilyMatch(context, account, message, true);
+            maybeAutoLabelExact(context, account, message);
 
             AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
-            // Intelligence must never be able to break mail synchronization.
             Log.e(ex);
         }
     }
@@ -175,8 +171,7 @@ public final class SpamIntelligence {
 
     /**
      * Explicitly state that one message does not belong to one family without
-     * claiming the message is legitimate. Confirmed members require an explicit
-     * reassignment/correction instead of silently contradicting their label.
+     * claiming the message is legitimate.
      */
     public static boolean excludeFromFamily(Context context,
                                             EntityAccount account,
@@ -211,8 +206,6 @@ public final class SpamIntelligence {
             exclusion.reason = reason == null ? null : reason.trim();
             familyDao.insertExclusion(exclusion);
 
-            // Fail closed if the process dies during recomputation: never leave
-            // an explicitly excluded family displayed as the current winner.
             if (delivery.predicted_family_id != null &&
                     delivery.predicted_family_id == familyId)
                 familyDao.clearFamilyMatch(account.uuid, message.id,
@@ -253,11 +246,20 @@ public final class SpamIntelligence {
             SpamFamilyStore.LearnResult familyLearn = null;
             if (label == EntityAliasDelivery.LABEL_SPAM) {
                 SpamFamilyFingerprint fingerprint = SpamFamilyMessageAdapter.fromMessage(context, message);
+                SpamFamilyIdentity.Identity identity = SpamFamilyMessageAdapter.identityFromMessage(message);
                 if (requestedFamilyId != null) {
                     familyLearn = SpamFamilyStore.learnSpamIntoFamily(
                             context, account.uuid, message.id, fingerprint, requestedFamilyId);
                     familyId = familyLearn.familyId;
+                    if (identity != null && familyId != null)
+                        SpamFamilyStore.bindIdentity(context, account.uuid, identity.key, familyId);
+                } else if (fingerprint != null && identity != null) {
+                    familyLearn = SpamFamilyStore.learnSpamExact(
+                            context, account.uuid, message.id, fingerprint, identity.key);
+                    familyId = familyLearn.familyId;
                 } else if (fingerprint != null) {
+                    // Conservative fallback only when a message genuinely lacks
+                    // the sender-name/subject pair needed for exact identity.
                     familyLearn = SpamFamilyStore.learnSpam(
                             context, account.uuid, message.id, fingerprint);
                     familyId = familyLearn.familyId;
@@ -303,9 +305,10 @@ public final class SpamIntelligence {
 
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
-                if (label == EntityAliasDelivery.LABEL_SPAM)
-                    dao.markCompromised(account.uuid, after.address);
-                else {
+                if (label == EntityAliasDelivery.LABEL_SPAM) {
+                    if (SpamControlPolicy.markAliasCompromised(context))
+                        dao.markCompromised(account.uuid, after.address);
+                } else {
                     EntityAlias alias = dao.getAlias(account.uuid, after.address);
                     if (alias != null && alias.state == EntityAlias.STATE_COMPROMISED &&
                             alias.spam_hits == 0)
@@ -349,14 +352,19 @@ public final class SpamIntelligence {
 
         DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
         long assessedAt = System.currentTimeMillis();
-        SpamFamilyFingerprint fingerprint = SpamFamilyMessageAdapter.fromMessage(context, message);
-        if (fingerprint == null) {
+        if (!SpamControlPolicy.exactFamilyDetection(context)) {
             dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
             return;
         }
 
-        SpamFamilyStore.Match match = SpamFamilyStore.matchForMessage(
-                context, account.uuid, message.id, fingerprint);
+        SpamFamilyIdentity.Identity identity = SpamFamilyMessageAdapter.identityFromMessage(message);
+        if (identity == null) {
+            dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
+            return;
+        }
+
+        SpamFamilyStore.Match match = SpamFamilyStore.matchIdentity(
+                context, account.uuid, message.id, identity.key);
         if (match.familyId == null) {
             dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
             return;
@@ -367,10 +375,27 @@ public final class SpamIntelligence {
                 score.value, score.raw, score.text, score.structure,
                 score.links, score.sender, assessedAt);
         if (log)
-            Log.i("SpamFamily match family=" + match.familyId +
-                    " spamLike=" + match.spamLike +
-                    " message=" + message.id +
-                    " " + score);
+            Log.i("SpamFamily exact match family=" + match.familyId +
+                    " message=" + message.id + " identity=" + identity.key);
+    }
+
+    private static void maybeAutoLabelExact(Context context,
+                                            EntityAccount account,
+                                            EntityMessage message) {
+        if (!SpamControlPolicy.autoLabelExact(context) || message == null || message.id == null)
+            return;
+        try {
+            EntityAliasDelivery delivery = SpamIntelligenceDB.getInstance(context)
+                    .alias().getDelivery(account.uuid, message.id);
+            if (delivery == null || delivery.label != EntityAliasDelivery.LABEL_UNKNOWN ||
+                    delivery.predicted_family_id == null)
+                return;
+            learnSpam(context, account, message, delivery.predicted_family_id);
+            Log.i("SpamControl auto-confirm exact family=" + delivery.predicted_family_id +
+                    " message=" + message.id);
+        } catch (Throwable ex) {
+            Log.e(ex);
+        }
     }
 
     private static String emailDomain(String address) {
