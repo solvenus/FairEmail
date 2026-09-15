@@ -126,4 +126,10 @@ public class EntityAlias {
     public Long smtp_reject_verified_at;
     /** Last actuator/read-back error. Never stores credentials or raw API responses containing secrets. */
     public String smtp_reject_error;
+    /**
+     * Provider-neutral JSON snapshot of explicit routes present before a burn.
+     * Empty route arrays mean the address relied on catch-all/default routing.
+     * This intentionally stores routing metadata only, never API credentials.
+     */
+    public String smtp_route_snapshot;
 }
