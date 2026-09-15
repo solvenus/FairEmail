@@ -1,0 +1,44 @@
+name: Apply Spam Control alias undo
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/fix_alias_undo_patcher.py'
+      - '.github/scripts/patch_spam_control_alias_undo.py'
+      - '.github/workflows/apply-spam-control-alias-undo.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Harden patcher and apply alias undo patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/fix_alias_undo_patcher.py
+          python3 .github/scripts/patch_spam_control_alias_undo.py
+          git diff --check
+          git status --short
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/scripts/patch_spam_control_alias_undo.py \
+                  app/src/main/java/eu/faircode/email/AliasCompromiseReviewStore.java \
+                  app/src/main/java/eu/faircode/email/SpamLearningSnapshot.java \
+                  app/src/main/java/eu/faircode/email/SpamUndoManager.java \
+                  app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Make alias compromise decisions fully undoable"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
