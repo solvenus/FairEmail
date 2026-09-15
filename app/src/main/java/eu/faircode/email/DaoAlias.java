@@ -173,6 +173,23 @@ public interface DaoAlias {
             " LIMIT 1")
     EntityAliasDelivery getDelivery(String accountUuid, long messageId);
 
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid" +
+            " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
+            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)" +
+            " ORDER BY" +
+            " CASE WHEN label = " + EntityAliasDelivery.LABEL_UNKNOWN + " THEN 0 ELSE 1 END," +
+            " CASE WHEN traffic_verdict = 'SUSPICIOUS' THEN 0 ELSE 1 END," +
+            " spam_support DESC, family_score DESC, received DESC" +
+            " LIMIT :limit")
+    List<EntityAliasDelivery> getReviewQueue(String accountUuid, boolean includeReviewed, int limit);
+
+    @Query("SELECT COUNT(*) FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid" +
+            " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
+            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)")
+    int countReviewQueue(String accountUuid, boolean includeReviewed);
+
     @Query("UPDATE alias_delivery SET folder_type = :folderType" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     int setDeliveryFolder(String accountUuid, long messageId, String folderType);
