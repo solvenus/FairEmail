@@ -107,9 +107,60 @@ public interface DaoSpamFamily {
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     int clearFamilyMatch(String accountUuid, long messageId, long assessedAt);
 
+    @Query("UPDATE alias_delivery SET" +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_score_raw = NULL," +
+            " family_text = NULL," +
+            " family_structure = NULL," +
+            " family_links = NULL," +
+            " family_sender = NULL," +
+            " family_assessed_at = :assessedAt" +
+            " WHERE predicted_family_id = :familyId")
+    int clearPredictionsForFamily(long familyId, long assessedAt);
+
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
             " AND predicted_family_id IS NOT NULL" +
             " ORDER BY family_score DESC, received DESC")
     LiveData<List<EntityAliasDelivery>> liveFamilyMatches(String accountUuid);
+
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid" +
+            " AND message_id < :beforeExclusive" +
+            " ORDER BY message_id DESC" +
+            " LIMIT :limit")
+    List<EntityAliasDelivery> getRescorePage(String accountUuid, long beforeExclusive, int limit);
+
+    @Query("SELECT * FROM spam_rescore_task" +
+            " WHERE account_uuid = :accountUuid AND family_id = :familyId" +
+            " LIMIT 1")
+    EntitySpamRescoreTask getRescoreTask(String accountUuid, long familyId);
+
+    @Query("SELECT * FROM spam_rescore_task" +
+            " ORDER BY requested_at, account_uuid, family_id" +
+            " LIMIT 1")
+    EntitySpamRescoreTask getNextRescoreTask();
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    void putRescoreTask(EntitySpamRescoreTask task);
+
+    @Query("UPDATE spam_rescore_task SET" +
+            " before_message_id = :beforeMessageId," +
+            " updated_at = :updatedAt," +
+            " processed = :processed," +
+            " matches = :matches" +
+            " WHERE account_uuid = :accountUuid AND family_id = :familyId" +
+            " AND requested_at = :generation")
+    int checkpointRescoreTask(String accountUuid, long familyId, long generation,
+                              long beforeMessageId, long updatedAt,
+                              int processed, int matches);
+
+    @Query("DELETE FROM spam_rescore_task" +
+            " WHERE account_uuid = :accountUuid AND family_id = :familyId" +
+            " AND requested_at = :generation")
+    int deleteRescoreTask(String accountUuid, long familyId, long generation);
+
+    @Query("DELETE FROM spam_rescore_task WHERE family_id = :familyId")
+    int deleteRescoreTasksForFamily(long familyId);
 }
