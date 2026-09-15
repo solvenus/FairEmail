@@ -135,6 +135,9 @@ public interface DaoAlias {
     @Query("SELECT long_value FROM spam_meta WHERE `key` = :key LIMIT 1")
     Long getMetaLong(String key);
 
+    @Query("SELECT text_value FROM spam_meta WHERE `key` = :key LIMIT 1")
+    String getMetaText(String key);
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     void putMeta(EntitySpamMeta meta);
 }
