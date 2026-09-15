@@ -1,5 +1,6 @@
 name: Apply canonical Spam message state via API
 
+# trigger: 2026-09-15T18:20+02:00
 on:
   push:
     branches: [feature/spam-control-p0]
