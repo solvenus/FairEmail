@@ -17,10 +17,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-/**
- * Restart-safe observer-only scan of already indexed mail when a spam family
- * gains or loses an exemplar. This class never moves, deletes, or labels mail.
- */
+/** Restart-safe observer-only scan using exact sender-name + subject family identity. */
 public final class SpamFamilyRescorer {
     private static final int PAGE_SIZE = 24;
     private static final long PAGE_DELAY_MS = 35L;
@@ -36,17 +33,12 @@ public final class SpamFamilyRescorer {
     private SpamFamilyRescorer() {
     }
 
-    /** Resume any persisted work after process restart. */
     public static void start(Context context) {
         if (context == null)
             return;
         schedule(context.getApplicationContext(), 0L);
     }
 
-    /**
-     * Coalescing enqueue. Re-enqueueing the same account/family resets the cursor
-     * with a newer generation. An older worker can no longer checkpoint over it.
-     */
     public static void enqueue(Context context, String accountUuid, long familyId) {
         if (context == null || accountUuid == null || accountUuid.trim().isEmpty() || familyId <= 0)
             return;
@@ -64,11 +56,6 @@ public final class SpamFamilyRescorer {
         });
     }
 
-    /**
-     * Rare expensive path used after a family is deleted. All surviving active
-     * families are rescanned so messages formerly owned by the deleted family
-     * can immediately acquire their next-best observer prediction.
-     */
     public static void enqueueAllActive(Context context, String accountUuid) {
         if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
             return;
@@ -86,8 +73,6 @@ public final class SpamFamilyRescorer {
                             continue;
                         putTask(dao, account, family.id, generationBase + i);
                     }
-                Log.i("SpamFamily full competition queued account=" + account +
-                        " families=" + (families == null ? 0 : families.size()));
             } catch (Throwable ex) {
                 Log.e(ex);
             } finally {
@@ -112,8 +97,6 @@ public final class SpamFamilyRescorer {
         task.requested_at = generation;
         task.updated_at = System.currentTimeMillis();
         dao.putRescoreTask(task);
-        Log.i("SpamFamily rescore queued account=" + account +
-                " family=" + familyId + " generation=" + generation);
     }
 
     private static void schedule(Context context, long delayMs) {
@@ -133,7 +116,6 @@ public final class SpamFamilyRescorer {
         }, delayMs, TimeUnit.MILLISECONDS);
     }
 
-    /** @return true when persisted work remains after this page. */
     private static boolean processOnePage(Context context) {
         SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
         DaoSpamFamily dao = intelligence.family();
@@ -141,9 +123,9 @@ public final class SpamFamilyRescorer {
         if (task == null)
             return false;
 
-        SpamFamilyStore.FamilyMatcher matcher = SpamFamilyStore.loadMatcher(
-                context, task.account_uuid, task.family_id);
-        if (matcher == null) {
+        EntitySpamFamily family = dao.getFamily(task.family_id);
+        if (family == null || family.id == null || !family.active ||
+                !task.account_uuid.equals(family.account_uuid)) {
             dao.deleteRescoreTask(task.account_uuid, task.family_id, task.requested_at);
             return dao.getNextRescoreTask() != null;
         }
@@ -171,61 +153,41 @@ public final class SpamFamilyRescorer {
                 if (message == null)
                     continue;
 
-                SpamFamilyFingerprint fingerprint =
-                        SpamFamilyMessageAdapter.fromMessage(context, message);
-                if (fingerprint == null)
-                    continue;
-
-                // A user exclusion is stronger than observer similarity. If this
-                // family currently owns the prediction, immediately recompute the
-                // competition without it; otherwise this family is simply skipped.
-                if (dao.countExclusion(task.account_uuid, delivery.message_id,
-                        task.family_id) > 0) {
-                    if (delivery.predicted_family_id != null &&
-                            delivery.predicted_family_id == task.family_id)
-                        applyBestMatch(context, dao, task.account_uuid,
-                                delivery.message_id, fingerprint);
+                long assessedAt = System.currentTimeMillis();
+                if (!SpamControlPolicy.exactFamilyDetection(context)) {
+                    dao.clearFamilyMatch(task.account_uuid, delivery.message_id, assessedAt);
                     continue;
                 }
 
-                SpamFamilyEngine.Score candidate = matcher.score(fingerprint);
-                if (candidate.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD)
+                SpamFamilyIdentity.Identity identity =
+                        SpamFamilyMessageAdapter.identityFromMessage(message);
+                SpamFamilyStore.Match best = identity == null
+                        ? null
+                        : SpamFamilyStore.matchIdentity(
+                                context, task.account_uuid, delivery.message_id, identity.key);
+
+                if (best == null || best.familyId == null) {
+                    dao.clearFamilyMatch(task.account_uuid, delivery.message_id, assessedAt);
+                    continue;
+                }
+
+                if (best.familyId == task.family_id)
                     matches++;
-
-                SpamFamilyPredictionPolicy.Action action = SpamFamilyPredictionPolicy.decide(
-                        delivery.predicted_family_id,
-                        delivery.family_score,
-                        task.family_id,
-                        candidate.value);
-                switch (action) {
-                    case RECOMPUTE_ALL:
-                        // Pruning/correction weakened the current winner. Let all
-                        // active families compete again for this one message.
-                        applyBestMatch(context, dao, task.account_uuid,
-                                delivery.message_id, fingerprint);
-                        break;
-                    case USE_CANDIDATE:
-                        setMatch(dao, task.account_uuid, delivery.message_id,
-                                task.family_id, candidate, System.currentTimeMillis());
-                        break;
-                    case KEEP_CURRENT:
-                    default:
-                        break;
-                }
+                SpamFamilyEngine.Score score = best.score;
+                dao.setFamilyMatch(task.account_uuid, delivery.message_id, best.familyId,
+                        score.value, score.raw, score.text, score.structure,
+                        score.links, score.sender, assessedAt);
             } catch (Throwable ex) {
-                // One damaged/missing historical message must not stop the scan.
                 Log.w(ex);
             }
         }
 
         long now = System.currentTimeMillis();
         if (page.size() < PAGE_SIZE) {
-            // A newer enqueue may have replaced this generation while the page
-            // was running. Generation-guarded delete intentionally leaves it.
             int deleted = dao.deleteRescoreTask(
                     task.account_uuid, task.family_id, task.requested_at);
             if (deleted > 0)
-                Log.i("SpamFamily rescore complete account=" + task.account_uuid +
+                Log.i("SpamFamily exact rescore complete account=" + task.account_uuid +
                         " family=" + task.family_id +
                         " processed=" + processed + " matches=" + matches);
         } else {
@@ -239,45 +201,13 @@ public final class SpamFamilyRescorer {
                     matches);
             if (checkpointed == 0)
                 Log.i("SpamFamily rescore superseded account=" + task.account_uuid +
-                        " family=" + task.family_id +
-                        " generation=" + task.requested_at);
+                        " family=" + task.family_id);
         }
 
         return dao.getNextRescoreTask() != null;
     }
 
     private static void finish(DaoSpamFamily dao, EntitySpamRescoreTask task) {
-        int deleted = dao.deleteRescoreTask(
-                task.account_uuid, task.family_id, task.requested_at);
-        if (deleted > 0)
-            Log.i("SpamFamily rescore complete account=" + task.account_uuid +
-                    " family=" + task.family_id +
-                    " processed=" + task.processed + " matches=" + task.matches);
-    }
-
-    private static void applyBestMatch(Context context,
-                                       DaoSpamFamily dao,
-                                       String accountUuid,
-                                       long messageId,
-                                       SpamFamilyFingerprint fingerprint) {
-        SpamFamilyStore.Match best = SpamFamilyStore.matchForMessage(
-                context, accountUuid, messageId, fingerprint);
-        long assessedAt = System.currentTimeMillis();
-        if (best.familyId == null)
-            dao.clearFamilyMatch(accountUuid, messageId, assessedAt);
-        else
-            setMatch(dao, accountUuid, messageId, best.familyId,
-                    best.score, assessedAt);
-    }
-
-    private static void setMatch(DaoSpamFamily dao,
-                                 String accountUuid,
-                                 long messageId,
-                                 long familyId,
-                                 SpamFamilyEngine.Score score,
-                                 long assessedAt) {
-        dao.setFamilyMatch(accountUuid, messageId, familyId,
-                score.value, score.raw, score.text, score.structure,
-                score.links, score.sender, assessedAt);
+        dao.deleteRescoreTask(task.account_uuid, task.family_id, task.requested_at);
     }
 }
