@@ -67,6 +67,32 @@ public final class SpamFamilyLab {
                 html);
     }
 
+    private static void aliasReputationChecks() {
+        String alias = SpamAliasReputation.normalizeAddress(
+                "Example Service <SD_Service@Example.org>");
+        require("sd_service@example.org".equals(alias),
+                "alias normalization must survive display-name/address syntax");
+
+        SpamAliasReputation.Model reputation = new SpamAliasReputation.Model();
+        for (int i = 0; i < 12; i++)
+            reputation.observe(alias, "expected.example", false);
+        for (int i = 0; i < 6; i++)
+            reputation.observe(alias, "abuse.example", true);
+
+        SpamAliasReputation.Reputation known = reputation.get(alias, "expected.example");
+        SpamAliasReputation.Reputation newSender = reputation.get(alias, "never-seen.example");
+        SpamAliasReputation.Reputation abusive = reputation.get(alias, "abuse.example");
+
+        require(known.senderHam == 12,
+                "known sender must retain legitimate history");
+        require(abusive.senderSpam == 6,
+                "abusive sender must retain spam history");
+        require(newSender.unexpectedSender > known.unexpectedSender + 0.30,
+                "unfamiliar sender should be anomalous on an established alias");
+        require(reputation.get(alias).effectiveRisk > 0.10,
+                "repeated spam should lift alias risk above the prior");
+    }
+
     public static void main(String[] args) {
         SpamFamilyFingerprint a = akusoli();
         SpamFamilyFingerprint b = wifiBooster();
@@ -102,6 +128,7 @@ public final class SpamFamilyLab {
         SpamFamilyEngine.Match ham = model.match(c);
         require(!ham.spamLike, "legitimate mail must not match this spam family");
 
+        aliasReputationChecks();
         System.out.println("PASS family=" + first.familyId + " count=" + model.familyCount());
     }
 }
