@@ -60,6 +60,16 @@ public interface DaoSpamSnapshot {
     @Query("SELECT * FROM alias_delivery ORDER BY account_uuid, message_id")
     List<EntityAliasDelivery> getAllDeliveries();
 
+    @Query("SELECT * FROM spam_message" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId LIMIT 1")
+    EntitySpamMessage getSpamMessage(String accountUuid, long messageId);
+
+    @Query("SELECT * FROM spam_message WHERE account_uuid = :accountUuid ORDER BY message_id")
+    List<EntitySpamMessage> getSpamMessages(String accountUuid);
+
+    @Query("SELECT * FROM spam_message ORDER BY account_uuid, message_id")
+    List<EntitySpamMessage> getAllSpamMessages();
+
     @Query("SELECT * FROM spam_meta WHERE key LIKE :prefix || '%' ORDER BY key")
     List<EntitySpamMeta> getMetaByPrefix(String prefix);
 
@@ -145,6 +155,42 @@ public interface DaoSpamSnapshot {
                                 Double spamSupport, Double hamSupport,
                                 Double trafficNet, String trafficVerdict,
                                 String trafficReasons, Long assessedAt);
+
+    @Query("UPDATE spam_message SET" +
+            " label = :label," +
+            " family_id = :familyId," +
+            " predicted_family_id = :predictedFamilyId," +
+            " family_score = :familyScore," +
+            " family_assessed_at = :familyAssessedAt" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int restoreSpamMessageLearning(String accountUuid, long messageId,
+                                   int label, Long familyId,
+                                   Long predictedFamilyId, Double familyScore,
+                                   Long familyAssessedAt);
+
+    @Query("UPDATE spam_message SET" +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_assessed_at = NULL" +
+            " WHERE account_uuid = :accountUuid")
+    int clearSpamMessagePredictions(String accountUuid);
+
+    @Query("UPDATE spam_message SET" +
+            " label = " + EntitySpamMessage.LABEL_UNKNOWN + "," +
+            " family_id = NULL," +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_assessed_at = NULL" +
+            " WHERE account_uuid = :accountUuid")
+    int resetAccountSpamMessageLearning(String accountUuid);
+
+    @Query("UPDATE spam_message SET" +
+            " label = " + EntitySpamMessage.LABEL_UNKNOWN + "," +
+            " family_id = NULL," +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_assessed_at = NULL")
+    int resetAllSpamMessageLearning();
 
     @Query("UPDATE alias SET" +
             " spam_hits = 0," +
