@@ -72,6 +72,18 @@ public interface DaoAlias {
             " WHERE account_uuid = :accountUuid AND address = :address")
     int setFamilyCounts(String accountUuid, String address, String familyCounts);
 
+    @Query("UPDATE alias SET observed_domains = :observedDomains" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setObservedDomains(String accountUuid, String address, String observedDomains);
+
+    @Query("UPDATE alias SET trusted_domains = :trustedDomains" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setTrustedDomains(String accountUuid, String address, String trustedDomains);
+
+    @Query("UPDATE alias SET service_domain = :serviceDomain" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setServiceDomain(String accountUuid, String address, String serviceDomain);
+
     @Query("UPDATE alias SET state = :state" +
             " WHERE account_uuid = :accountUuid AND address = :address")
     int setState(String accountUuid, String address, int state);
@@ -102,6 +114,12 @@ public interface DaoAlias {
     @Query("UPDATE alias_delivery SET folder_type = :folderType" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     int setDeliveryFolder(String accountUuid, long messageId, String folderType);
+
+    @Query("UPDATE alias_delivery SET sender_domain = :senderDomain," +
+            " has_unsubscribe = :hasUnsubscribe" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int setDeliveryEvidence(String accountUuid, long messageId,
+                            String senderDomain, boolean hasUnsubscribe);
 
     @Query("UPDATE alias_delivery SET label = :label, family_id = :familyId" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
