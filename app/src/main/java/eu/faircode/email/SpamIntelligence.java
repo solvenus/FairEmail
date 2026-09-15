@@ -78,7 +78,7 @@ public final class SpamIntelligence {
             refreshAssessment(context, account, message, true);
 
             // Reuse FairEmail's existing sender_extra mechanism, but constrain it
-            // to exact active aliases already observed in our registry.
+            // to exact reply-capable aliases already observed in our registry.
             AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
             // Intelligence must never be able to break mail synchronization.
@@ -87,9 +87,8 @@ public final class SpamIntelligence {
     }
 
     /**
-     * True only for an active alias actually observed for this FairEmail account.
-     * This lets automatic replies use an envelope alias without opening the
-     * identity to arbitrary sender editing.
+     * True only for a reply-capable alias actually observed for this FairEmail
+     * account. COMPROMISED remains reply-capable until the service is rotated.
      */
     public static boolean isKnownAlias(Context context,
                                        EntityIdentity identity,
@@ -117,7 +116,7 @@ public final class SpamIntelligence {
 
             EntityAlias known = SpamIntelligenceDB.getInstance(context)
                     .alias().getAlias(account.uuid, alias);
-            return known != null && known.state == EntityAlias.STATE_ACTIVE;
+            return known != null && AliasSenderManager.isReplyCapable(known.state);
         } catch (Throwable ex) {
             Log.e(ex);
             return false;
@@ -144,7 +143,7 @@ public final class SpamIntelligence {
 
     /**
      * Permit sender-extra semantics either through FairEmail's own setting or
-     * through an exact active alias present in the local Alias Registry.
+     * through an exact reply-capable alias present in the local Alias Registry.
      */
     public static boolean permitsExtra(Context context,
                                        EntityIdentity identity,
@@ -195,14 +194,16 @@ public final class SpamIntelligence {
                     message.id == null || account.uuid == null)
                 return;
 
+            DaoAlias dao = SpamIntelligenceDB.getInstance(context).alias();
+
             // Label actions can arrive before a message has passed the normal
             // intelligence ingress. Ensure a ledger row exists first.
-            EntityAliasDelivery delivery = SpamIntelligenceDB.getInstance(context)
-                    .alias().getDelivery(account.uuid, message.id);
+            EntityAliasDelivery delivery = dao.getDelivery(account.uuid, message.id);
             if (delivery == null && message.folder != null && message.deliveredto != null) {
                 EntityFolder folder = DB.getInstance(context).folder().getFolder(message.folder);
                 if (folder != null)
                     observeMessage(context, account, folder, message);
+                delivery = dao.getDelivery(account.uuid, message.id);
             }
 
             boolean changed = SpamAliasStore.setLabel(
@@ -211,8 +212,24 @@ public final class SpamIntelligence {
                     message.id,
                     label,
                     familyId);
-            if (changed)
-                refreshAssessment(context, account, message, false);
+            if (!changed)
+                return;
+
+            // A confirmed spam delivery means the address has escaped its intended
+            // context. This does NOT retire it yet; COMPROMISED stays reply-capable.
+            delivery = dao.getDelivery(account.uuid, message.id);
+            if (delivery != null) {
+                if (label == EntityAliasDelivery.LABEL_SPAM)
+                    dao.markCompromised(account.uuid, delivery.address);
+                else {
+                    EntityAlias alias = dao.getAlias(account.uuid, delivery.address);
+                    if (alias != null && alias.state == EntityAlias.STATE_COMPROMISED &&
+                            alias.spam_hits == 0)
+                        dao.setState(account.uuid, delivery.address, EntityAlias.STATE_ACTIVE);
+                }
+            }
+
+            refreshAssessment(context, account, message, false);
         } catch (Throwable ex) {
             Log.e(ex);
         }
