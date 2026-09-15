@@ -12,6 +12,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Learns spam/ham reputation for the real SMTP envelope recipient.
@@ -25,6 +27,9 @@ import java.util.Map;
  * receive several unrelated spam families.
  */
 public final class SpamAliasReputation {
+    private static final Pattern EMAIL = Pattern.compile(
+            "(?i)([a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.-]+\\.[a-z]{2,})");
+
     private SpamAliasReputation() {
     }
 
@@ -193,13 +198,22 @@ public final class SpamAliasReputation {
     }
 
     static String normalizeAddress(String deliveredTo) {
-        if (deliveredTo == null) return null;
-        String value = deliveredTo.trim().toLowerCase(Locale.ROOT);
-        if (value.startsWith("<") && value.endsWith(">") && value.length() > 2)
-            value = value.substring(1, value.length() - 1).trim();
-        int comma = value.indexOf(',');
-        if (comma >= 0) value = value.substring(0, comma).trim();
-        return value.contains("@") ? value : null;
+        if (deliveredTo == null)
+            return null;
+        String raw = deliveredTo.trim();
+        if (raw.isEmpty())
+            return null;
+
+        Matcher matcher = EMAIL.matcher(raw);
+        if (!matcher.find())
+            return null;
+
+        String address = matcher.group(1);
+        int at = address.lastIndexOf('@');
+        if (at <= 0 || at + 1 >= address.length())
+            return null;
+        return address.substring(0, at).toLowerCase(Locale.ROOT) + "@" +
+                address.substring(at + 1).toLowerCase(Locale.ROOT);
     }
 
     static String normalizeDomain(String value) {
