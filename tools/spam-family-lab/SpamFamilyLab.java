@@ -94,8 +94,9 @@ public final class SpamFamilyLab {
     }
 
     private static void aliasTrafficChecks() {
-        // Ubuy-like legitimate newsletter: alias/domain agree, sender has prior
-        // legitimate history, and unsubscribe is present.
+        // Ubuy-like legitimate newsletter. Even when the alias itself has some
+        // spam exposure, exact domain agreement + legitimate history +
+        // unsubscribe must keep this message on the legitimate side.
         AliasTrafficScorer.Input ubuy = new AliasTrafficScorer.Input();
         ubuy.senderDomainKnown = true;
         ubuy.serviceDomainKnown = true;
@@ -103,14 +104,16 @@ public final class SpamFamilyLab {
         ubuy.trustedDomainsConfigured = true;
         ubuy.trustedDomainMatch = true;
         ubuy.aliasDomainSimilarity = 1.0;
+        ubuy.aliasSpamRisk = 0.35;
+        ubuy.senderSpamConfidence = 0.0;
         ubuy.senderHamConfidence = 0.85;
         ubuy.unexpectedSender = 0.05;
         ubuy.hasUnsubscribe = true;
         AliasTrafficScorer.Assessment legit = AliasTrafficScorer.assess(ubuy);
         require(legit.verdict == AliasTrafficScorer.Verdict.LIKELY_LEGIT,
                 "matching service newsletter with unsubscribe must be strongly legitimate");
-        require(legit.hamSupport > 0.90 && legit.spamSupport < 0.10,
-                "Ubuy-style hard negative must retain a large legitimacy margin");
+        require(legit.hamSupport > 0.90 && legit.net < -0.65,
+                "Ubuy-style hard negative must beat generic alias spam exposure by a large margin");
 
         // Leaked service alias hit by an unrelated sender after the expected
         // domain has been established.
@@ -121,14 +124,26 @@ public final class SpamFamilyLab {
         leaked.trustedDomainsConfigured = true;
         leaked.trustedDomainMatch = false;
         leaked.aliasDomainSimilarity = 0.0;
+        leaked.aliasSpamRisk = 0.75;
+        leaked.senderSpamConfidence = 0.80;
         leaked.senderHamConfidence = 0.0;
         leaked.unexpectedSender = 0.90;
         leaked.hasUnsubscribe = false;
         AliasTrafficScorer.Assessment suspicious = AliasTrafficScorer.assess(leaked);
         require(suspicious.verdict == AliasTrafficScorer.Verdict.SUSPICIOUS,
                 "established alias plus unrelated domain must be suspicious");
-        require(suspicious.spamSupport > 0.90,
-                "independent mismatch signals should compound strongly");
+        require(suspicious.spamSupport > 0.95,
+                "independent mismatch and spam-history signals should compound strongly");
+
+        // A repeatedly abusive sender domain is meaningful even before the user
+        // assigns an explicit service domain to the alias.
+        AliasTrafficScorer.Input knownAbuse = new AliasTrafficScorer.Input();
+        knownAbuse.senderDomainKnown = true;
+        knownAbuse.aliasSpamRisk = 0.45;
+        knownAbuse.senderSpamConfidence = 0.90;
+        AliasTrafficScorer.Assessment abusive = AliasTrafficScorer.assess(knownAbuse);
+        require(abusive.verdict == AliasTrafficScorer.Verdict.SUSPICIOUS,
+                "repeated sender-domain spam history should independently become suspicious");
 
         // A brand-new alias with no learned/explicit domain relationship must
         // not be convicted from lack of text overlap alone.
@@ -143,6 +158,7 @@ public final class SpamFamilyLab {
 
         System.out.println("Alias legit      : " + legit);
         System.out.println("Alias suspicious : " + suspicious);
+        System.out.println("Alias known abuse: " + abusive);
         System.out.println("Alias cold start : " + coldStart);
     }
 
