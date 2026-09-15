@@ -11,7 +11,6 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 
 
 repository = Path("app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java")
-activity = Path("app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java")
 
 replace_once(
     repository,
@@ -119,51 +118,4 @@ replace_once(
     "pass combined spam decision into candidate",
 )
 
-replace_once(
-    activity,
-    '''                .append("Aliasvurdering: ").append(empty(candidate.aliasVerdict, "ukjent")).append('\\n')
-                .append("Aliasårsaker: ").append(empty(candidate.aliasReasons, "ingen")).append("\\n\\n")
-                .append("Spamgruppelikhet: ").append(percent(candidate.score)).append('\\n')''',
-    '''                .append("Aliasvurdering: ").append(empty(candidate.aliasVerdict, "ukjent")).append('\\n')
-                .append("Aliasårsaker: ").append(empty(candidate.aliasReasons, "ingen")).append("\\n\\n")
-                .append("SAMLET VURDERING\\n")
-                .append("Spamstøtte: ").append(percent(candidate.overallSpamSupport)).append('\\n')
-                .append("Legitimitetsstøtte: ").append(percent(candidate.overallHamSupport)).append('\\n')
-                .append("Resultat: ").append(candidate.overallVerdict).append('\\n')
-                .append("Årsaker: ").append(candidate.overallReasons.isEmpty()
-                        ? "ingen" : android.text.TextUtils.join(", ", candidate.overallReasons))
-                .append("\\n\\n")
-                .append("Spamgruppelikhet: ").append(percent(candidate.score)).append('\\n')''',
-    "show combined decision in technical details",
-)
-
-replace_once(
-    activity,
-    '''    private String messageState(SpamFamilyLabRepository.Candidate candidate) {
-        if (candidate.explicitHam)
-            return "✓ Du har merket denne som IKKE SPAM";
-        if (candidate.confirmedThisFamily)
-            return "✓ Bekreftet spam i denne gruppen";
-        if (candidate.confirmedFamilyId != null)
-            return "✓ Bekreftet spam i en annen spamgruppe";
-        if (candidate.strong)
-            return "⚠ Sterkt spamtreff · trenger din kontroll";
-        return "Mulig spamtreff · trenger din kontroll";
-    }''',
-    '''    private String messageState(SpamFamilyLabRepository.Candidate candidate) {
-        if (candidate.explicitHam)
-            return "✓ Du har merket denne som IKKE SPAM";
-        if (candidate.confirmedThisFamily)
-            return "✓ Bekreftet spam i denne gruppen";
-        if (candidate.confirmedFamilyId != null)
-            return "✓ Bekreftet spam i en annen spamgruppe";
-        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.SUSPICIOUS)
-            return "⚠ Høy spamrisiko · trenger din kontroll";
-        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.LIKELY_LEGIT)
-            return "✓ Sterke legitimitetssignaler · kontroller før du endrer";
-        return "Trenger din vurdering";
-    }''',
-    "human combined decision status",
-)
-
-print("PASS: integrated combined alias and spam-group decision into Spam Control")
+print("PASS: integrated combined decision into Spam Control candidate model")
