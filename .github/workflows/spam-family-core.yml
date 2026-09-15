@@ -9,6 +9,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasReputation.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficScorer.java'
+      - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
       - 'tools/spam-family-lab/**'
       - '.github/workflows/spam-family-core.yml'
   workflow_dispatch:
@@ -36,6 +37,7 @@ jobs:
             app/src/main/java/eu/faircode/email/SpamFamilyEngine.java \
             app/src/main/java/eu/faircode/email/SpamAliasReputation.java \
             app/src/main/java/eu/faircode/email/AliasTrafficScorer.java \
+            app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java \
             tools/spam-family-lab/SpamFamilyLab.java
       - name: Run spam family lab
         run: |
