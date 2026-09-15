@@ -83,15 +83,26 @@ public final class SpamFamilyLabRepository {
         if (resolved.result != null)
             return resolved.result;
 
-        EntitySpamFamily family = SpamIntelligenceDB.getInstance(context)
-                .family().getFamily(familyId);
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        EntitySpamFamily family = intelligence.family().getFamily(familyId);
         if (family == null || family.id == null ||
                 !resolved.account.uuid.equals(family.account_uuid))
             return ActionResult.FAMILY_MISSING;
 
-        SpamIntelligence.learnSpam(context, resolved.account, resolved.message, familyId);
-        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
-                .alias().getDelivery(resolved.account.uuid, messageId);
+        EntityAliasDelivery before = intelligence.alias()
+                .getDelivery(resolved.account.uuid, messageId);
+        if (before != null &&
+                before.label == EntityAliasDelivery.LABEL_SPAM &&
+                before.family_id != null && before.family_id != familyId) {
+            SpamFamilyReassigner.Result reassigned = SpamFamilyReassigner.reassign(
+                    context, resolved.account, resolved.message, familyId);
+            if (!reassigned.applied())
+                return ActionResult.REJECTED;
+        } else
+            SpamIntelligence.learnSpam(context, resolved.account, resolved.message, familyId);
+
+        EntityAliasDelivery after = intelligence.alias()
+                .getDelivery(resolved.account.uuid, messageId);
         return after != null &&
                 after.label == EntityAliasDelivery.LABEL_SPAM &&
                 after.family_id != null && after.family_id == familyId
