@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 9,
+        version = 10,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
@@ -34,7 +34,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
                 EntitySpamFamily.class,
                 EntitySpamFamilyExemplar.class,
                 EntitySpamRescoreTask.class,
-                EntitySpamFamilyExclusion.class
+                EntitySpamFamilyExclusion.class,
+                EntitySpamActionHistory.class
         },
         exportSchema = true
 )
@@ -184,8 +185,31 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_9_10 = new Migration(9, 10) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS spam_action_history (" +
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT," +
+                    "account_uuid TEXT NOT NULL," +
+                    "message_id INTEGER," +
+                    "context_family_id INTEGER," +
+                    "action TEXT NOT NULL," +
+                    "description TEXT NOT NULL," +
+                    "before_json TEXT NOT NULL," +
+                    "created_at INTEGER NOT NULL," +
+                    "undone_at INTEGER)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_action_history_account_uuid" +
+                    " ON spam_action_history(account_uuid)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_action_history_account_uuid_created_at" +
+                    " ON spam_action_history(account_uuid, created_at)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_action_history_undone_at" +
+                    " ON spam_action_history(undone_at)");
+        }
+    };
+
     public abstract DaoAlias alias();
     public abstract DaoSpamFamily family();
+    public abstract DaoSpamActionHistory actions();
 
     public static SpamIntelligenceDB getInstance(Context context) {
         SpamIntelligenceDB current = instance;
@@ -201,7 +225,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 DB_NAME)
                         .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                                 MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                                MIGRATION_7_8, MIGRATION_8_9)
+                                MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                         .build();
                 instance = current;
             }
