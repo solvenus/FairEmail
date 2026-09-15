@@ -1,0 +1,51 @@
+name: Apply Spam Control terminal observability via API
+
+on:
+  push:
+    branches: [feature/spam-control-p0]
+    paths: ['.github/workflows/apply-spam-terminal-observability-api.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: feature/spam-control-p0
+    steps:
+      - name: Patch terminal observability through Contents API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile,urllib.parse,urllib.request
+          repo=os.environ['REPO']; branch=os.environ['BRANCH']; token=os.environ['GH_TOKEN']
+          files=['app/src/main/java/eu/faircode/email/SpamControlLog.java','app/src/main/java/eu/faircode/email/CpanelAliasActuator.java','app/src/main/java/eu/faircode/email/SpamHistoricalScanner.java','app/src/main/java/eu/faircode/email/ActivitySpamControl.java']
+          script='.github/scripts/patch_spam_terminal_observability.py'
+          h={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'spam-terminal-patcher'}
+          def get(p):
+              u=f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(p)}?ref={urllib.parse.quote(branch)}'
+              with urllib.request.urlopen(urllib.request.Request(u,headers=h)) as r:return json.loads(r.read().decode())
+          def put(p,sha,text):
+              u=f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(p)}'
+              body={'message':'Add Spam Control Terminal observability','content':base64.b64encode(text.encode()).decode(),'sha':sha,'branch':branch}
+              with urllib.request.urlopen(urllib.request.Request(u,data=json.dumps(body).encode(),method='PUT',headers=h)) as r:return json.loads(r.read().decode())
+          current={p:get(p) for p in files}; sobj=get(script)
+          if 'TERMINAL("Terminal")' in base64.b64decode(current[files[-1]]['content']).decode():
+              print('already patched'); raise SystemExit(0)
+          with tempfile.TemporaryDirectory() as td:
+              root=pathlib.Path(td)
+              for p,o in current.items():
+                  q=root/p;q.parent.mkdir(parents=True,exist_ok=True);q.write_text(base64.b64decode(o['content']).decode())
+              q=root/script;q.parent.mkdir(parents=True,exist_ok=True);q.write_text(base64.b64decode(sobj['content']).decode())
+              subprocess.run(['python3',str(q)],cwd=root,check=True)
+              out={p:(root/p).read_text() for p in files}
+          checks={files[0]:['public static void d','public static void t'],files[1]:['< BODY ','> GET '],files[2]:['INDEX message=','< PAGE '],files[3]:['TERMINAL("Terminal")','renderTerminal()','messageDao.countReviewQueue','Uten Envelope-To (fortsatt indeksert)']}
+          for p,needles in checks.items():
+              for n in needles: assert n in out[p],(p,n)
+          for p in files:
+              res=put(p,current[p]['sha'],out[p]); print('updated',p,res['commit']['sha'])
+          PY
