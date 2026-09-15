@@ -16,7 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
-/** Persistent counterpart of SpamFamilyEngine.Model. */
+/** Persistent spam-family storage plus legacy fingerprint/network matching helpers. */
 public final class SpamFamilyStore {
     private static final int MIN_LEARN_EVIDENCE = 12;
 
@@ -83,13 +83,122 @@ public final class SpamFamilyStore {
         }
     }
 
+    /**
+     * Exact production family lookup. No body/template/link/sender-address
+     * similarity is allowed to create family identity here.
+     */
+    public static synchronized Match matchIdentity(Context context,
+                                                   String accountUuid,
+                                                   long messageId,
+                                                   String identityKey) {
+        if (context == null || accountUuid == null || identityKey == null)
+            return new Match(null, SpamFamilyEngine.Score.ZERO, false);
+
+        SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(context);
+        DaoSpamFamily dao = db.family();
+        Long familyId = db.alias().getMetaLong(
+                SpamFamilyIdentity.metaKey(accountUuid, identityKey));
+        if (familyId == null || familyId <= 0)
+            return new Match(null, SpamFamilyEngine.Score.ZERO, false);
+
+        EntitySpamFamily family = dao.getFamily(familyId);
+        if (family == null || family.id == null || !family.active ||
+                !accountUuid.equals(family.account_uuid))
+            return new Match(null, SpamFamilyEngine.Score.ZERO, false);
+        if (messageId > 0 && dao.countExclusion(accountUuid, messageId, familyId) > 0)
+            return new Match(null, SpamFamilyEngine.Score.ZERO, false);
+
+        return new Match(familyId, SpamFamilyEngine.Score.exact(), true);
+    }
+
+    /**
+     * Exact production learning path. A normalized sender-name + subject pair
+     * owns one family id. Fingerprints are retained as network/template evidence
+     * but never decide which family receives the message.
+     */
+    public static synchronized LearnResult learnSpamExact(Context context,
+                                                          String accountUuid,
+                                                          long messageId,
+                                                          SpamFamilyFingerprint fingerprint,
+                                                          String identityKey) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty() ||
+                messageId <= 0 || identityKey == null || fingerprint == null ||
+                fingerprint.evidenceCount() <= 0)
+            return new LearnResult(null, false, false, SpamFamilyEngine.Score.ZERO);
+
+        SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(context);
+        DaoSpamFamily dao = db.family();
+        EntitySpamFamilyExemplar existing = dao.getExemplar(accountUuid, messageId);
+        if (existing != null) {
+            EntitySpamFamily family = dao.getFamily(existing.family_id);
+            if (family != null && !family.active)
+                dao.setFamilyActive(family.id, true, System.currentTimeMillis());
+            bindIdentity(db, accountUuid, identityKey, existing.family_id);
+            return new LearnResult(existing.family_id, false, false,
+                    scoreSafely(fingerprint, existing.fingerprint));
+        }
+
+        Long mapped = db.alias().getMetaLong(
+                SpamFamilyIdentity.metaKey(accountUuid, identityKey));
+        EntitySpamFamily family = mapped == null ? null : dao.getFamily(mapped);
+        long now = System.currentTimeMillis();
+        long familyId;
+        boolean created;
+
+        if (family != null && family.id != null &&
+                accountUuid.equals(family.account_uuid)) {
+            familyId = family.id;
+            created = false;
+            if (!family.active)
+                dao.setFamilyActive(familyId, true, now);
+        } else {
+            EntitySpamFamily fresh = new EntitySpamFamily();
+            fresh.account_uuid = accountUuid;
+            fresh.created_at = now;
+            fresh.updated_at = now;
+            fresh.confirmed_count = 0;
+            fresh.active = true;
+            familyId = dao.insertFamily(fresh);
+            created = true;
+        }
+
+        SpamFamilyEngine.Score previous = bestInFamily(dao, familyId, fingerprint);
+        LearnResult result = insertExemplar(dao, accountUuid, messageId, fingerprint,
+                familyId, created, previous, now);
+        if (result.familyId != null)
+            bindIdentity(db, accountUuid, identityKey, result.familyId);
+        return result;
+    }
+
+    public static synchronized void bindIdentity(Context context,
+                                                 String accountUuid,
+                                                 String identityKey,
+                                                 long familyId) {
+        if (context == null)
+            return;
+        bindIdentity(SpamIntelligenceDB.getInstance(context), accountUuid, identityKey, familyId);
+    }
+
+    private static void bindIdentity(SpamIntelligenceDB db,
+                                     String accountUuid,
+                                     String identityKey,
+                                     long familyId) {
+        if (db == null || accountUuid == null || identityKey == null || familyId <= 0)
+            return;
+        EntitySpamMeta meta = new EntitySpamMeta();
+        meta.key = SpamFamilyIdentity.metaKey(accountUuid, identityKey);
+        meta.long_value = familyId;
+        db.alias().putMeta(meta);
+    }
+
+    /** Legacy fuzzy matcher retained for network/template diagnostics and labs. */
     public static synchronized Match match(Context context,
                                            String accountUuid,
                                            SpamFamilyFingerprint fingerprint) {
         return matchInternal(context, accountUuid, 0L, fingerprint);
     }
 
-    /** Match while honoring explicit per-message family exclusions. */
+    /** Legacy fuzzy matcher retained for diagnostics. Production prediction uses matchIdentity. */
     public static synchronized Match matchForMessage(Context context,
                                                      String accountUuid,
                                                      long messageId,
@@ -111,7 +220,7 @@ public final class SpamFamilyStore {
                 best.familyId != null && best.score.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD);
     }
 
-    /** Load and decode one family once for an entire retroactive scan. */
+    /** Load and decode one family once for network/template diagnostics. */
     public static synchronized FamilyMatcher loadMatcher(Context context,
                                                          String accountUuid,
                                                          long familyId) {
@@ -141,6 +250,7 @@ public final class SpamFamilyStore {
         return decoded.isEmpty() ? null : new FamilyMatcher(familyId, decoded);
     }
 
+    /** Legacy fuzzy learn path kept only for diagnostics/backwards-compatible tools. */
     public static synchronized LearnResult learnSpam(Context context,
                                                      String accountUuid,
                                                      long messageId,
@@ -189,7 +299,6 @@ public final class SpamFamilyStore {
     /**
      * Explicit user assignment to an existing family. Unlike automatic joining,
      * this never substitutes a different family merely because it scores higher.
-     * Explicit confirmation also cancels an earlier exclusion of that exact pair.
      */
     public static synchronized LearnResult learnSpamIntoFamily(Context context,
                                                                String accountUuid,
@@ -216,12 +325,10 @@ public final class SpamFamilyStore {
                     dao.setFamilyActive(requestedFamilyId, true, System.currentTimeMillis());
                 dao.deleteExclusion(accountUuid, messageId, requestedFamilyId);
             }
-            // A message already exemplifying another family is not silently
-            // moved here. Family reassignment deserves an explicit operation.
             return new LearnResult(existing.family_id, false, false, score);
         }
 
-        if (fingerprint == null || fingerprint.evidenceCount() < MIN_LEARN_EVIDENCE)
+        if (fingerprint == null || fingerprint.evidenceCount() <= 0)
             return new LearnResult(requestedFamilyId, false, false,
                     SpamFamilyEngine.Score.ZERO);
 
@@ -283,9 +390,6 @@ public final class SpamFamilyStore {
 
         prune(dao, familyId);
 
-        // The ledger label is written immediately after this call. Keep a new
-        // family alive provisionally; reconcileFamily() replaces this value with
-        // the real lifetime confirmed count once the label commit succeeds.
         int confirmed = dao.countConfirmedMembers(familyId);
         dao.setFamilyStats(familyId, Math.max(1, confirmed), now);
         return new LearnResult(familyId, created, true, previous);
@@ -346,7 +450,6 @@ public final class SpamFamilyStore {
             return SpamFamilyEngine.compare(fingerprint,
                     SpamFamilyFingerprint.fromBytes(encoded));
         } catch (Throwable ex) {
-            // One corrupt exemplar must not disable all family matching.
             Log.w(ex);
             return SpamFamilyEngine.Score.ZERO;
         }
@@ -366,8 +469,6 @@ public final class SpamFamilyStore {
     private static void reconcileFamily(DaoSpamFamily dao, long familyId, long now) {
         int confirmed = dao.countConfirmedMembers(familyId);
         if (confirmed <= 0) {
-            // Predictions/exclusions are evidence, not foreign keys. Clear them
-            // before deleting the model so UI can never point at a dead family.
             dao.clearPredictionsForFamily(familyId, now);
             dao.deleteExclusionsForFamily(familyId);
             dao.deleteRescoreTasksForFamily(familyId);
@@ -378,8 +479,6 @@ public final class SpamFamilyStore {
 
         dao.setFamilyStats(familyId, confirmed, now);
         if (dao.countExemplars(familyId) == 0) {
-            // Keep confirmed historical membership, but a family with no model
-            // must not participate in matching or retroactive rescoring.
             dao.setFamilyActive(familyId, false, now);
             dao.clearPredictionsForFamily(familyId, now);
             dao.deleteRescoreTasksForFamily(familyId);
