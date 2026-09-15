@@ -222,6 +222,23 @@ public interface DaoAlias {
     @Query("DELETE FROM alias_delivery WHERE account_uuid = :accountUuid")
     int deleteDeliveries(String accountUuid);
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    long insertSpamIntent(EntitySpamIntent intent);
+
+    @Query("SELECT * FROM spam_intent" +
+            " ORDER BY operation_id" +
+            " LIMIT :limit")
+    List<EntitySpamIntent> getSpamIntents(int limit);
+
+    @Query("UPDATE spam_intent SET" +
+            " attempts = attempts + 1," +
+            " last_attempt_at = :attemptedAt" +
+            " WHERE operation_id = :operationId")
+    int markSpamIntentAttempt(long operationId, long attemptedAt);
+
+    @Query("DELETE FROM spam_intent WHERE operation_id = :operationId")
+    int deleteSpamIntent(long operationId);
+
     @Query("SELECT long_value FROM spam_meta WHERE `key` = :key LIMIT 1")
     Long getMetaLong(String key);
 
