@@ -27,7 +27,8 @@ public final class SpamIntelligence {
                                       EntityFolder folder,
                                       EntityMessage message) {
         try {
-            if (context == null || folder == null || message == null || message.account == null)
+            if (context == null || folder == null || message == null ||
+                    message.account == null || message.deliveredto == null)
                 return;
             EntityAccount account = DB.getInstance(context).account().getAccount(message.account);
             observeMessage(context, account, folder, message);
@@ -43,7 +44,7 @@ public final class SpamIntelligence {
                                       EntityMessage message) {
         try {
             if (context == null || account == null || folder == null || message == null ||
-                    message.id == null || account.uuid == null)
+                    message.id == null || account.uuid == null || message.deliveredto == null)
                 return;
 
             SpamAliasStore.observeDelivery(
