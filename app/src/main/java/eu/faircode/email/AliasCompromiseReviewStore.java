@@ -9,6 +9,9 @@ import java.util.Locale;
  * Remembers that the user reviewed an ambiguous alias-compromise question at a
  * particular spam-hit count. New spam evidence automatically makes it reviewable
  * again. COMPROMISED itself remains represented by EntityAlias.state.
+ *
+ * A stored review at the alias' current spam-hit count is also the explicit
+ * human statement that the alias is healthy/legitimate at that evidence level.
  */
 public final class AliasCompromiseReviewStore {
     private static final String PREFIX = "alias_compromise_review:";
@@ -25,6 +28,17 @@ public final class AliasCompromiseReviewStore {
         Long reviewedAtSpamCount = SpamIntelligenceDB.getInstance(context)
                 .alias().getMetaLong(key(alias.account_uuid, alias.address));
         return reviewedAtSpamCount == null || reviewedAtSpamCount < spam;
+    }
+
+    /** True when the user/policy explicitly resolved this ACTIVE alias as healthy at current evidence. */
+    public static boolean isReviewedHealthy(Context context, EntityAlias alias) {
+        if (context == null || alias == null || alias.account_uuid == null || alias.address == null ||
+                alias.state != EntityAlias.STATE_ACTIVE)
+            return false;
+        long currentSpam = alias.spam_hits == null ? 0L : alias.spam_hits;
+        Long reviewedAtSpamCount = SpamIntelligenceDB.getInstance(context)
+                .alias().getMetaLong(key(alias.account_uuid, alias.address));
+        return reviewedAtSpamCount != null && reviewedAtSpamCount == currentSpam;
     }
 
     public static boolean markReviewedHealthy(Context context, EntityAlias alias) {
