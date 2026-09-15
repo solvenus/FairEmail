@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Verify SpamIntelligenceDB MIGRATION_8_9 against Room's generated v9 schema.
+"""Verify migration-created SpamIntelligenceDB tables against Room schemas.
 
-The script deliberately reads both sources of truth at runtime:
+The script reads both sources of truth at runtime:
   * SQL statements are extracted from SpamIntelligenceDB.java.
   * Expected table/index metadata is read from Room's generated schema JSON.
 
@@ -20,8 +20,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 JAVA = ROOT / "app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java"
 SCHEMA_ROOT = ROOT / "app/schemas"
-TABLE = "spam_family_exclusion"
-MIGRATION = "MIGRATION_8_9"
+CASES = [
+    ("MIGRATION_8_9", 9, "spam_family_exclusion"),
+    ("MIGRATION_9_10", 10, "spam_action_history"),
+]
 
 
 def fail(message: str) -> None:
@@ -29,19 +31,19 @@ def fail(message: str) -> None:
     raise SystemExit(1)
 
 
-def extract_sql() -> list[str]:
+def extract_sql(migration: str) -> list[str]:
     source = JAVA.read_text(encoding="utf-8")
-    start = source.find(MIGRATION)
+    start = source.find(migration)
     if start < 0:
-        fail(f"{MIGRATION} not found in {JAVA}")
+        fail(f"{migration} not found in {JAVA}")
     end = source.find("\n    };", start)
     if end < 0:
-        fail(f"Could not locate end of {MIGRATION}")
+        fail(f"Could not locate end of {migration}")
     block = source[start:end]
 
     calls = re.findall(r"db\.execSQL\((.*?)\);", block, flags=re.DOTALL)
     if not calls:
-        fail(f"No execSQL statements found in {MIGRATION}")
+        fail(f"No execSQL statements found in {migration}")
 
     statements: list[str] = []
     for expression in calls:
@@ -50,19 +52,19 @@ def extract_sql() -> list[str]:
             fail(f"Could not decode execSQL expression: {expression!r}")
         try:
             statement = "".join(ast.literal_eval(f'"{literal}"') for literal in literals)
-        except Exception as exc:  # pragma: no cover - CI diagnostic path
+        except Exception as exc:
             fail(f"Could not decode Java string literal: {exc}")
         statements.append(statement)
     return statements
 
 
-def find_room_entity() -> tuple[Path, dict]:
+def find_room_entity(version: int, table: str) -> tuple[Path, dict]:
     if not SCHEMA_ROOT.exists():
         fail(f"Room schema directory not generated: {SCHEMA_ROOT}")
 
-    candidates = sorted(SCHEMA_ROOT.rglob("9.json"))
+    candidates = sorted(SCHEMA_ROOT.rglob(f"{version}.json"))
     if not candidates:
-        fail("No Room v9 schema JSON found after compilation")
+        fail(f"No Room v{version} schema JSON found after compilation")
 
     for path in candidates:
         try:
@@ -71,9 +73,9 @@ def find_room_entity() -> tuple[Path, dict]:
             continue
         database = data.get("database", {})
         for entity in database.get("entities", []):
-            if entity.get("tableName") == TABLE:
+            if entity.get("tableName") == table:
                 return path, entity
-    fail(f"Room v9 schema found, but table {TABLE!r} is missing")
+    fail(f"Room v{version} schema found, but table {table!r} is missing")
 
 
 def normalize_affinity(value: str | None) -> str:
@@ -89,18 +91,18 @@ def normalize_affinity(value: str | None) -> str:
     return "NUMERIC"
 
 
-def main() -> None:
-    statements = extract_sql()
-    schema_path, entity = find_room_entity()
+def verify_case(migration: str, version: int, table: str) -> None:
+    statements = extract_sql(migration)
+    schema_path, entity = find_room_entity(version, table)
 
     db = sqlite3.connect(":memory:")
     try:
         for statement in statements:
             db.execute(statement)
 
-        actual_rows = db.execute(f"PRAGMA table_info('{TABLE}')").fetchall()
+        actual_rows = db.execute(f"PRAGMA table_info('{table}')").fetchall()
         if not actual_rows:
-            fail(f"Migration did not create table {TABLE}")
+            fail(f"{migration} did not create table {table}")
 
         actual_columns = {
             row[1]: {
@@ -120,7 +122,7 @@ def main() -> None:
 
         if set(actual_columns) != set(expected_columns):
             fail(
-                "Column set mismatch: "
+                f"{migration} column set mismatch: "
                 f"actual={sorted(actual_columns)} expected={sorted(expected_columns)}"
             )
 
@@ -128,12 +130,12 @@ def main() -> None:
             actual = actual_columns[name]
             if actual["affinity"] != expected["affinity"]:
                 fail(
-                    f"Affinity mismatch for {name}: "
+                    f"{migration} affinity mismatch for {name}: "
                     f"actual={actual['affinity']} expected={expected['affinity']}"
                 )
             if actual["notNull"] != expected["notNull"]:
                 fail(
-                    f"Nullability mismatch for {name}: "
+                    f"{migration} nullability mismatch for {name}: "
                     f"actual={actual['notNull']} expected={expected['notNull']}"
                 )
 
@@ -146,7 +148,7 @@ def main() -> None:
             if metadata["pk"] > 0
         ]
         if actual_pk != expected_pk:
-            fail(f"Primary key mismatch: actual={actual_pk} expected={expected_pk}")
+            fail(f"{migration} primary key mismatch: actual={actual_pk} expected={expected_pk}")
 
         expected_indices = {
             index["name"]: {
@@ -155,7 +157,7 @@ def main() -> None:
             }
             for index in entity.get("indices", [])
         }
-        index_rows = db.execute(f"PRAGMA index_list('{TABLE}')").fetchall()
+        index_rows = db.execute(f"PRAGMA index_list('{table}')").fetchall()
         actual_named = {
             row[1]: {
                 "unique": bool(row[2]),
@@ -170,22 +172,27 @@ def main() -> None:
 
         if set(actual_named) != set(expected_indices):
             fail(
-                "Index set mismatch: "
+                f"{migration} index set mismatch: "
                 f"actual={sorted(actual_named)} expected={sorted(expected_indices)}"
             )
 
         for name, expected in expected_indices.items():
             actual = actual_named[name]
             if actual != expected:
-                fail(f"Index mismatch for {name}: actual={actual} expected={expected}")
+                fail(f"{migration} index mismatch for {name}: actual={actual} expected={expected}")
 
         print(
-            f"PASS {MIGRATION}: {TABLE} matches Room schema from "
+            f"PASS {migration}: {table} matches Room schema from "
             f"{schema_path.relative_to(ROOT)}"
         )
         print(f"Executed {len(statements)} migration statements")
     finally:
         db.close()
+
+
+def main() -> None:
+    for migration, version, table in CASES:
+        verify_case(migration, version, table)
 
 
 if __name__ == "__main__":
