@@ -73,6 +73,11 @@ public interface DaoSpamFamily {
     @Query("SELECT COUNT(*) FROM spam_family_exemplar WHERE family_id = :familyId")
     int countExemplars(long familyId);
 
+    @Query("SELECT COUNT(*) FROM alias_delivery" +
+            " WHERE family_id = :familyId" +
+            " AND label = " + EntityAliasDelivery.LABEL_SPAM)
+    int countConfirmedMembers(long familyId);
+
     @Query("UPDATE alias_delivery SET" +
             " predicted_family_id = :familyId," +
             " family_score = :score," +
