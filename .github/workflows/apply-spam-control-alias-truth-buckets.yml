@@ -1,3 +1,4 @@
+# Trigger: truthful alias classification after control-integrity hardening
 name: Apply Spam Control alias truth buckets
 
 on:
