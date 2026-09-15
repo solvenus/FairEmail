@@ -241,8 +241,12 @@ public final class SpamIntelligence {
                         context, account.uuid, message.id, before.family_id);
             }
 
-            if (changedFamily != null && intelligence.family().getFamily(changedFamily) != null)
-                SpamFamilyRescorer.enqueue(context, account.uuid, changedFamily);
+            if (changedFamily != null) {
+                if (intelligence.family().getFamily(changedFamily) != null)
+                    SpamFamilyRescorer.enqueue(context, account.uuid, changedFamily);
+                else
+                    SpamFamilyRescorer.enqueueAllActive(context, account.uuid);
+            }
 
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
