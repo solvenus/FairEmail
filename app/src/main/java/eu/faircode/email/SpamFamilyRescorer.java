@@ -119,6 +119,7 @@ public final class SpamFamilyRescorer {
     private static boolean processOnePage(Context context) {
         SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
         DaoSpamFamily dao = intelligence.family();
+        DaoSpamMessage messageDao = intelligence.message();
         EntitySpamRescoreTask task = dao.getNextRescoreTask();
         if (task == null)
             return false;
@@ -130,7 +131,7 @@ public final class SpamFamilyRescorer {
             return dao.getNextRescoreTask() != null;
         }
 
-        List<EntityAliasDelivery> page = dao.getRescorePage(
+        List<EntitySpamMessage> page = messageDao.getRescorePage(
                 task.account_uuid, task.before_message_id, PAGE_SIZE);
         if (page == null || page.isEmpty()) {
             finish(dao, task);
@@ -142,20 +143,21 @@ public final class SpamFamilyRescorer {
         int processed = task.processed;
         int matches = task.matches;
 
-        for (EntityAliasDelivery delivery : page) {
-            if (delivery == null)
+        for (EntitySpamMessage state : page) {
+            if (state == null)
                 continue;
-            nextBefore = Math.min(nextBefore, delivery.message_id);
+            nextBefore = Math.min(nextBefore, state.message_id);
             processed++;
 
             try {
-                EntityMessage message = mail.message().getMessage(delivery.message_id);
+                EntityMessage message = mail.message().getMessage(state.message_id);
                 if (message == null)
                     continue;
 
                 long assessedAt = System.currentTimeMillis();
                 if (!SpamControlPolicy.exactFamilyDetection(context)) {
-                    dao.clearFamilyMatch(task.account_uuid, delivery.message_id, assessedAt);
+                    messageDao.clearPrediction(task.account_uuid, state.message_id, assessedAt);
+                    dao.clearFamilyMatch(task.account_uuid, state.message_id, assessedAt);
                     continue;
                 }
 
@@ -164,17 +166,20 @@ public final class SpamFamilyRescorer {
                 SpamFamilyStore.Match best = identity == null
                         ? null
                         : SpamFamilyStore.matchIdentity(
-                                context, task.account_uuid, delivery.message_id, identity.key);
+                                context, task.account_uuid, state.message_id, identity.key);
 
                 if (best == null || best.familyId == null) {
-                    dao.clearFamilyMatch(task.account_uuid, delivery.message_id, assessedAt);
+                    messageDao.clearPrediction(task.account_uuid, state.message_id, assessedAt);
+                    dao.clearFamilyMatch(task.account_uuid, state.message_id, assessedAt);
                     continue;
                 }
 
                 if (best.familyId == task.family_id)
                     matches++;
                 SpamFamilyEngine.Score score = best.score;
-                dao.setFamilyMatch(task.account_uuid, delivery.message_id, best.familyId,
+                messageDao.setPrediction(task.account_uuid, state.message_id, best.familyId,
+                        score.value, assessedAt);
+                dao.setFamilyMatch(task.account_uuid, state.message_id, best.familyId,
                         score.value, score.raw, score.text, score.structure,
                         score.links, score.sender, assessedAt);
             } catch (Throwable ex) {
