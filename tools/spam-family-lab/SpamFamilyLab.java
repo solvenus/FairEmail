@@ -162,6 +162,40 @@ public final class SpamFamilyLab {
         System.out.println("Alias cold start : " + coldStart);
     }
 
+    private static void domainSuggestionChecks() {
+        AliasDomainSuggestionScorer.Input exact = new AliasDomainSuggestionScorer.Input();
+        exact.messages = 2;
+        exact.unsubscribe = 1;
+        exact.ham = 1;
+        exact.spam = 0;
+        exact.aliasDomainSimilarity = 1.0;
+        exact.exactAliasDomainMatch = true;
+        AliasDomainSuggestionScorer.Suggestion ubuy = AliasDomainSuggestionScorer.score(exact);
+        require(ubuy.recommended && ubuy.confidence > 0.70,
+                "exact alias/domain agreement with benign history should be recommended");
+
+        AliasDomainSuggestionScorer.Input poisoned = new AliasDomainSuggestionScorer.Input();
+        poisoned.messages = 100;
+        poisoned.unsubscribe = 100;
+        poisoned.ham = 0;
+        poisoned.spam = 20;
+        poisoned.aliasDomainSimilarity = 0.0;
+        poisoned.exactAliasDomainMatch = false;
+        AliasDomainSuggestionScorer.Suggestion poison = AliasDomainSuggestionScorer.score(poisoned);
+        require(!poison.recommended,
+                "high-volume spam must never vote itself into trusted-domain suggestions");
+
+        AliasDomainSuggestionScorer.Input volumeOnly = new AliasDomainSuggestionScorer.Input();
+        volumeOnly.messages = 500;
+        AliasDomainSuggestionScorer.Suggestion volume = AliasDomainSuggestionScorer.score(volumeOnly);
+        require(!volume.recommended && volume.confidence == 0.0,
+                "raw repetition alone must contribute no trust support");
+
+        System.out.println("Domain exact      : " + ubuy);
+        System.out.println("Domain poisoned   : " + poison);
+        System.out.println("Domain volume only: " + volume);
+    }
+
     public static void main(String[] args) {
         SpamFamilyFingerprint a = akusoli();
         SpamFamilyFingerprint b = wifiBooster();
@@ -199,6 +233,7 @@ public final class SpamFamilyLab {
 
         aliasReputationChecks();
         aliasTrafficChecks();
+        domainSuggestionChecks();
         System.out.println("PASS family=" + first.familyId + " count=" + model.familyCount());
     }
 }
