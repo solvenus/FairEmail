@@ -925,6 +925,8 @@ public class ActivitySpamControl extends ActivityBase {
             return 0;
 
         if (alias.state == EntityAlias.STATE_ACTIVE) {
+            if (AliasCompromiseReviewStore.isReviewedHealthy(this, alias))
+                return 1;
             if (ham > 0 || aliasHasInboxTraffic(alias))
                 return 1;
 
@@ -972,6 +974,22 @@ public class ActivitySpamControl extends ActivityBase {
         body.addView(lifecycle, matchWrapWithMargin(0, 4, 0, 0));
         body.addView(bodyText("SMTP: " + smtpState(alias)),
                 matchWrapWithMargin(0, 2, 0, 0));
+
+        if (aliasBucket(alias) == 2) {
+            TextView decision = bodyText("UAVKLART · velg direkte:");
+            decision.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            body.addView(decision, matchWrapWithMargin(0, 8, 0, 0));
+
+            LinearLayout resolve = new LinearLayout(this);
+            resolve.setOrientation(LinearLayout.HORIZONTAL);
+            Button legitimate = primaryButton("Legitimt alias");
+            legitimate.setOnClickListener(v -> markAliasLegitimate(alias));
+            resolve.addView(legitimate, weightedButton());
+            Button compromised = primaryButton("Spam / kompromittert");
+            compromised.setOnClickListener(v -> markAliasCompromisedDirect(alias));
+            resolve.addView(compromised, weightedButton());
+            body.addView(resolve, matchWrapWithMargin(0, 5, 0, 0));
+        }
 
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
@@ -1022,6 +1040,80 @@ public class ActivitySpamControl extends ActivityBase {
         card.addView(body, matchWrap());
         card.setOnClickListener(v -> showAliasEditor(alias));
         return card;
+    }
+
+    private void markAliasLegitimate(EntityAlias alias) {
+        EntityAccount account = selectedAccount;
+        if (alias == null || account == null || account.uuid == null ||
+                !account.uuid.equals(alias.account_uuid))
+            return;
+        tvStatus.setText("Markerer alias legitimt …");
+        executor.execute(() -> {
+            boolean changed = SpamUndoManager.runAccountAction(
+                    getApplicationContext(), account.uuid,
+                    SpamUndoManager.ACTION_ALIAS_KEEP_ACTIVE,
+                    "Marker alias legitimt",
+                    () -> {
+                        DaoAlias dao = SpamIntelligenceDB.getInstance(
+                                getApplicationContext()).alias();
+                        EntityAlias current = dao.getAlias(account.uuid, alias.address);
+                        if (current == null)
+                            return false;
+                        if (current.state != EntityAlias.STATE_ACTIVE &&
+                                dao.setState(account.uuid, alias.address, EntityAlias.STATE_ACTIVE) != 1)
+                            return false;
+                        EntityAlias active = dao.getAlias(account.uuid, alias.address);
+                        return active != null &&
+                                AliasCompromiseReviewStore.markReviewedHealthy(
+                                        getApplicationContext(), active);
+                    });
+            SpamControlLog.i(getApplicationContext(), "ALIAS",
+                    "RESOLVE alias=" + alias.address + " decision=LEGITIMATE changed=" + changed);
+            runOnUiThread(() -> {
+                if (!isSelected(account) || isFinishing() || isDestroyed())
+                    return;
+                String message = changed
+                        ? "Alias markert legitimt."
+                        : "Alias var allerede markert legitimt.";
+                tvStatus.setText(message);
+                if (changed)
+                    Snackbar.make(svContent, message, Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest()).show();
+                loadDashboardExtras(account);
+                renderCurrent();
+            });
+        });
+    }
+
+    private void markAliasCompromisedDirect(EntityAlias alias) {
+        EntityAccount account = selectedAccount;
+        if (alias == null || account == null || account.uuid == null ||
+                !account.uuid.equals(alias.account_uuid))
+            return;
+        tvStatus.setText("Markerer alias spam / kompromittert …");
+        executor.execute(() -> {
+            boolean changed = SpamUndoManager.runAccountAction(
+                    getApplicationContext(), account.uuid,
+                    SpamUndoManager.ACTION_ALIAS_COMPROMISED,
+                    "Marker alias spam / kompromittert",
+                    () -> SpamIntelligenceDB.getInstance(getApplicationContext()).alias()
+                            .markCompromised(account.uuid, alias.address) > 0);
+            SpamControlLog.i(getApplicationContext(), "ALIAS",
+                    "RESOLVE alias=" + alias.address + " decision=COMPROMISED changed=" + changed);
+            runOnUiThread(() -> {
+                if (!isSelected(account) || isFinishing() || isDestroyed())
+                    return;
+                String message = changed
+                        ? "Alias markert spam / kompromittert."
+                        : "Alias var allerede markert kompromittert.";
+                tvStatus.setText(message);
+                if (changed)
+                    Snackbar.make(svContent, message, Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest()).show();
+                loadDashboardExtras(account);
+                renderCurrent();
+            });
+        });
     }
 
     private String aliasTimelineText(EntityAlias alias) {
