@@ -1,5 +1,6 @@
 name: Apply Spam Control terminal observability via API
 
+# trigger: terminal v1
 on:
   push:
     branches: [feature/spam-control-p0]
