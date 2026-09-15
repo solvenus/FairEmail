@@ -1249,6 +1249,11 @@ public class ActivitySpamControl extends ActivityBase {
                 : family.name.trim() + (descriptor == null ? "" : "\n" + descriptor);
         TextView title = valueText(name, 17f, true);
         body.addView(title, matchWrap());
+        TextView activeState = bodyText(family.active
+                ? "● AKTIV · brukes av exact match"
+                : "○ INAKTIV · brukes ikke til nye exact-match treff");
+        activeState.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        body.addView(activeState, matchWrapWithMargin(0, 4, 0, 0));
         body.addView(bodyText(family.confirmed_count + " bekreftet · " +
                 family.strong_unknown_count + " eksakte nye treff"), matchWrapWithMargin(0, 5, 0, 0));
 
@@ -1263,6 +1268,7 @@ public class ActivitySpamControl extends ActivityBase {
         rename.setOnClickListener(v -> showRenameDialog(family));
         actions.addView(rename, weightedButton());
         Button rescore = secondaryButton("Skann på nytt");
+        rescore.setEnabled(family.active);
         rescore.setOnClickListener(v -> {
             EntityAccount account = selectedAccount;
             if (account != null)
@@ -1271,8 +1277,59 @@ public class ActivitySpamControl extends ActivityBase {
         });
         actions.addView(rescore, weightedButton());
         body.addView(actions, matchWrap());
+
+        Button active = secondaryButton(family.active ? "Deaktiver spamgruppe" : "Gjenoppliv spamgruppe");
+        active.setOnClickListener(v -> setFamilyActive(family, !family.active));
+        body.addView(active, matchWrapWithMargin(0, 5, 0, 0));
         card.addView(body, matchWrap());
         return card;
+    }
+
+    private void setFamilyActive(TupleSpamFamilyOverview family, boolean active) {
+        EntityAccount account = selectedAccount;
+        if (account == null || account.uuid == null || family == null)
+            return;
+
+        tvStatus.setText(active ? "Gjenoppliver spamgruppe …" : "Deaktiverer spamgruppe …");
+        executor.execute(() -> {
+            boolean changed = SpamUndoManager.runAccountAction(
+                    getApplicationContext(), account.uuid, "FAMILY_ACTIVE",
+                    active ? "Gjenoppliv spamgruppe" : "Deaktiver spamgruppe",
+                    () -> {
+                        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(
+                                getApplicationContext()).family();
+                        EntitySpamFamily current = dao.getFamily(family.family_id);
+                        if (current == null || current.id == null ||
+                                !account.uuid.equals(current.account_uuid) ||
+                                Boolean.TRUE.equals(current.active) == active)
+                            return false;
+
+                        long now = System.currentTimeMillis();
+                        if (dao.setFamilyActive(family.family_id, active, now) != 1)
+                            return false;
+                        if (!active)
+                            dao.clearPredictionsForFamily(family.family_id, now);
+                        return true;
+                    });
+
+            if (changed && active)
+                SpamFamilyLabRepository.requestRescore(
+                        getApplicationContext(), account.uuid, family.family_id);
+
+            runOnUiThread(() -> {
+                if (!isSelected(account) || isFinishing() || isDestroyed())
+                    return;
+                if (changed) {
+                    String message = active
+                            ? "Spamgruppen er gjenopplivet og rescan er lagt i kø."
+                            : "Spamgruppen er deaktivert. Bekreftet spam er beholdt.";
+                    tvStatus.setText(message);
+                    Snackbar.make(svContent, message, Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest()).show();
+                } else
+                    tvStatus.setText("Spamgruppestatus var allerede oppdatert.");
+            });
+        });
     }
 
     private void showFamilyMessages(TupleSpamFamilyOverview family) {
@@ -1541,7 +1598,8 @@ public class ActivitySpamControl extends ActivityBase {
         LinearLayout cb = cardBody(14, 12);
         cb.addView(valueText("cPanel / SMTP", 17f, true), matchWrap());
         cb.addView(bodyText(SpamControlPolicy.hasCpanelConfig(this)
-                ? "Konfigurert lokalt i denne appinstallasjonen."
+                ? "Konfigurert lokalt. Read-only testen verifiserer autentisering og lesetilgang. " +
+                  "Skriverettighet verifiseres først ved en kontrollert SMTP-burn."
                 : "Ikke konfigurert. Alias-burn er derfor utilgjengelig."), matchWrapWithMargin(0, 5, 0, 0));
         Button configure = secondaryButton("Konfigurer cPanel");
         configure.setOnClickListener(v -> showCpanelDialog());
@@ -1842,6 +1900,7 @@ public class ActivitySpamControl extends ActivityBase {
 
                 StringBuilder report = new StringBuilder();
                 report.append("Autentisering / UAPI: OK")
+                        .append("\nLesetilgang: verifisert")
                         .append("\nHome directory tilgjengelig: ")
                         .append(diagnostic.homeDirectoryKnown ? "ja" : "nei");
                 if (diagnostic.forwarderReadTested)
@@ -1851,9 +1910,11 @@ public class ActivitySpamControl extends ActivityBase {
                             .append(diagnostic.exactRouteCount);
                 else
                     report.append("\nEmail/list_forwarders: ikke testet — ingen aliaser er observert ennå.");
-                report.append("\n\nIngen serverdata ble endret.");
+                report.append("\nSkriverettighet: IKKE TESTET")
+                        .append("\nSkriverettighet verifiseres ved første kontrollerte SMTP-burn.")
+                        .append("\n\nIngen serverdata ble endret.");
 
-                tvStatus.setText("cPanel-test OK. Ingen serverdata ble endret.");
+                tvStatus.setText("cPanel read-only test OK. Skriverettighet er ikke testet.");
                 new AlertDialog.Builder(this)
                         .setTitle("cPanel-test OK")
                         .setMessage(report.toString())
