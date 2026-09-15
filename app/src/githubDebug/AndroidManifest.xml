@@ -4,7 +4,7 @@
         <activity
             android:name=".ActivitySpamFamilyLab"
             android:exported="true"
-            android:label="Spam Family Lab"
+            android:label="Spamkontroll"
             android:launchMode="singleTask"
             android:resizeableActivity="true">
             <intent-filter>
