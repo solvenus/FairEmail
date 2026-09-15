@@ -33,16 +33,30 @@ public final class AliasBurnPolicyLab {
                 "used compromised service alias must be rotated before burn");
         require(!b.burnAllowed, "service alias must not burn before replacement");
 
+        AliasBurnPolicy.Input replacementUnverified = new AliasBurnPolicy.Input();
+        replacementUnverified.aliasCompromised = true;
+        replacementUnverified.spamHits = 3;
+        replacementUnverified.hamHits = 20;
+        replacementUnverified.serviceDomainKnown = true;
+        replacementUnverified.replacementConfigured = true;
+        AliasBurnPolicy.Result verify = AliasBurnPolicy.evaluate(replacementUnverified);
+        require(verify.verdict == AliasBurnPolicy.Verdict.VERIFY_REPLACEMENT,
+                "configured replacement must be observed before burn");
+        require(!verify.burnAllowed,
+                "unverified replacement must never authorize burn");
+
         AliasBurnPolicy.Input replaced = new AliasBurnPolicy.Input();
         replaced.aliasCompromised = true;
         replaced.spamHits = 3;
         replaced.hamHits = 20;
         replaced.serviceDomainKnown = true;
         replaced.replacementConfigured = true;
+        replaced.replacementVerified = true;
         AliasBurnPolicy.Result c = AliasBurnPolicy.evaluate(replaced);
         require(c.verdict == AliasBurnPolicy.Verdict.READY_TO_BURN,
-                "replaced compromised alias should be burn-ready");
-        require(c.burnAllowed, "replacement plus explicit compromise is the burn gate");
+                "verified replacement should make compromised alias burn-ready");
+        require(c.burnAllowed,
+                "explicit compromise plus verified replacement is the burn gate");
 
         AliasBurnPolicy.Input unknownLeak = new AliasBurnPolicy.Input();
         unknownLeak.aliasCompromised = true;
@@ -57,6 +71,7 @@ public final class AliasBurnPolicyLab {
         pending.aliasCompromised = true;
         pending.spamHits = 2;
         pending.replacementConfigured = true;
+        pending.replacementVerified = true;
         pending.serverState = AliasBurnPolicy.ServerState.REJECT_PENDING;
         AliasBurnPolicy.Result e = AliasBurnPolicy.evaluate(pending);
         require(e.verdict == AliasBurnPolicy.Verdict.SERVER_PENDING,
@@ -74,6 +89,7 @@ public final class AliasBurnPolicyLab {
 
         System.out.println("PASS burn-policy " +
                 a.verdict + "," + review.verdict + "," + b.verdict + "," +
-                c.verdict + "," + d.verdict + "," + e.verdict + "," + f.verdict);
+                verify.verdict + "," + c.verdict + "," + d.verdict + "," +
+                e.verdict + "," + f.verdict);
     }
 }
