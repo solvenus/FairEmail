@@ -16,6 +16,6 @@ public final class SpamControlQueueStats {
             return 0;
         boolean includeReviewed = !SpamControlPolicy.hideReviewed(context);
         return Math.max(0, SpamIntelligenceDB.getInstance(context)
-                .alias().countReviewQueue(accountUuid.trim(), includeReviewed));
+                .message().countReviewQueue(accountUuid.trim(), includeReviewed));
     }
 }
