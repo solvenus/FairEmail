@@ -1,3 +1,4 @@
+# Trigger revision 1
 name: Apply Spam Control observability via API
 
 on:
@@ -110,8 +111,6 @@ jobs:
                   if needle not in updated[path]:
                       raise SystemExit(f'{path}: missing required patch marker: {needle}')
 
-          # Optimistic concurrency: every PUT uses the exact blob SHA read above.
-          # If another writer touched one of these files, GitHub rejects instead of overwriting it.
           for path in source_paths:
               result = api_put(path, sources[path]['sha'], updated[path],
                                'Add Spam Control diagnostics and truthful scan/cPanel errors')
