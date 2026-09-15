@@ -176,7 +176,8 @@ public interface DaoAlias {
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
-            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)" +
+            " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))" +
             " ORDER BY" +
             " CASE WHEN label = " + EntityAliasDelivery.LABEL_UNKNOWN + " THEN 0 ELSE 1 END," +
             " CASE WHEN traffic_verdict = 'SUSPICIOUS' THEN 0 ELSE 1 END," +
@@ -187,7 +188,8 @@ public interface DaoAlias {
     @Query("SELECT COUNT(*) FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
-            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)")
+            " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))")
     int countReviewQueue(String accountUuid, boolean includeReviewed);
 
     @Query("UPDATE alias_delivery SET folder_type = :folderType" +

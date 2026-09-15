@@ -293,6 +293,10 @@ public class ActivitySpamControl extends ActivityBase {
             reviewIndex = 0;
             reviewCount = 0;
             familyDescriptors.clear();
+            // Re-evaluate every retained delivery through the exact identity path.
+            // This flushes legacy fuzzy predictions without deleting human labels.
+            SpamFamilyRescorer.enqueueAllActive(getApplicationContext(), account.uuid);
+            SpamFamilyRescorer.start(getApplicationContext());
         }
 
         if (liveFamilies != null)
@@ -755,11 +759,7 @@ public class ActivitySpamControl extends ActivityBase {
                     fresh.note = cleanNullable(note);
                     fresh.state = stateFromPosition(statePosition);
                     ok = dao.updateAlias(fresh) == 1;
-                    if (ok && (fresh.state == EntityAlias.STATE_ACTIVE ||
-                            fresh.state == EntityAlias.STATE_COMPROMISED)) {
-                        EntityMessage latest = null;
-                        // Sender regex will also be synchronized naturally on next delivery/reply.
-                    }
+                    // Sender regex will also be synchronized naturally on next delivery/reply.
                 }
             } catch (Throwable ex) {
                 Log.e(ex);
