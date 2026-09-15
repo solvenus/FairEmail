@@ -28,7 +28,8 @@ import androidx.room.PrimaryKey;
                 @Index(value = {"account_uuid", "address"}, unique = true),
                 @Index(value = {"last_seen"}),
                 @Index(value = {"spam_hits"}),
-                @Index(value = {"service_domain"})
+                @Index(value = {"service_domain"}),
+                @Index(value = {"smtp_reject_state"})
         }
 )
 public class EntityAlias {
@@ -38,6 +39,14 @@ public class EntityAlias {
     public static final int STATE_REPLACED = 1;
     public static final int STATE_DISABLED = 2;
     public static final int STATE_IGNORED = 3;
+    /** Spam evidence says this address has leaked and should no longer be trusted. */
+    public static final int STATE_COMPROMISED = 4;
+
+    public static final int SMTP_REJECT_NONE = 0;
+    public static final int SMTP_REJECT_PENDING = 1;
+    public static final int SMTP_REJECT_VERIFIED = 2;
+    public static final int SMTP_REJECT_FAILED = 3;
+    public static final int SMTP_RESTORE_PENDING = 4;
 
     @PrimaryKey(autoGenerate = true)
     public Long id;
@@ -104,4 +113,17 @@ public class EntityAlias {
 
     /** Optional replacement alias when this address has been rotated. */
     public String replaced_by;
+
+    /** Physical SMTP rejection state. Kept separate from the local alias lifecycle. */
+    @NonNull
+    public Integer smtp_reject_state = SMTP_REJECT_NONE;
+    /** Provider/actuator that owns the current server action, for example "cpanel". */
+    public String smtp_reject_provider;
+    /** Failure text requested from the SMTP server, not a generated reply email. */
+    public String smtp_reject_reason;
+    /** Times are local audit metadata; only verified_at proves the read-back succeeded. */
+    public Long smtp_reject_requested_at;
+    public Long smtp_reject_verified_at;
+    /** Last actuator/read-back error. Never stores credentials or raw API responses containing secrets. */
+    public String smtp_reject_error;
 }
