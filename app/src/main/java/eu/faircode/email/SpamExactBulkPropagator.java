@@ -31,7 +31,9 @@ public final class SpamExactBulkPropagator {
         if (identity == null)
             return Result.NONE;
 
-        DaoAlias aliasDao = SpamIntelligenceDB.getInstance(context).alias();
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        DaoSpamMessage messageDao = intelligence.message();
+        DaoAlias aliasDao = intelligence.alias();
         DB mail = DB.getInstance(context);
         long afterMessageId = 0L;
         int messages = 1;
@@ -40,20 +42,20 @@ public final class SpamExactBulkPropagator {
             touchedAliases.add(seedAlias);
 
         while (true) {
-            List<EntityAliasDelivery> page = aliasDao.getUnknownDeliveriesAfter(
+            List<EntitySpamMessage> page = messageDao.getUnknownAfter(
                     account.uuid, afterMessageId, PAGE_SIZE);
             if (page == null || page.isEmpty())
                 break;
 
-            for (EntityAliasDelivery delivery : page) {
-                if (delivery == null)
+            for (EntitySpamMessage state : page) {
+                if (state == null)
                     continue;
-                afterMessageId = Math.max(afterMessageId, delivery.message_id);
-                if (delivery.message_id == seed.id)
+                afterMessageId = Math.max(afterMessageId, state.message_id);
+                if (state.message_id == seed.id)
                     continue;
 
                 try {
-                    EntityMessage message = mail.message().getMessage(delivery.message_id);
+                    EntityMessage message = mail.message().getMessage(state.message_id);
                     if (message == null)
                         continue;
                     SpamFamilyIdentity.Identity candidate =
@@ -64,14 +66,16 @@ public final class SpamExactBulkPropagator {
                     // The query only returns UNKNOWN rows. Human HAM decisions are
                     // therefore never silently overwritten by propagation.
                     SpamIntelligence.learnSpam(context, account, message, familyId);
-                    EntityAliasDelivery after = aliasDao.getDelivery(
-                            account.uuid, delivery.message_id);
+                    EntitySpamMessage after = messageDao.get(account.uuid, state.message_id);
                     if (after != null &&
-                            after.label == EntityAliasDelivery.LABEL_SPAM &&
+                            after.label == EntitySpamMessage.LABEL_SPAM &&
                             after.family_id != null && after.family_id == familyId) {
                         messages++;
-                        if (after.address != null)
-                            touchedAliases.add(after.address);
+                        EntityAliasDelivery aliasRow = aliasDao.getDelivery(
+                                account.uuid, state.message_id);
+                        String address = aliasRow == null ? after.delivered_to : aliasRow.address;
+                        if (address != null)
+                            touchedAliases.add(address);
                     }
                 } catch (Throwable ex) {
                     // One malformed/missing retained message must not prevent the
