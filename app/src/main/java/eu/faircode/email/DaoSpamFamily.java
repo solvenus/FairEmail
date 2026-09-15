@@ -90,6 +90,9 @@ public interface DaoSpamFamily {
     @Query("DELETE FROM spam_family WHERE id = :familyId")
     int deleteFamily(long familyId);
 
+    @Query("DELETE FROM spam_family WHERE account_uuid = :accountUuid")
+    int deleteFamiliesForAccount(String accountUuid);
+
     @Query("SELECT * FROM spam_family_exemplar" +
             " WHERE family_id = :familyId" +
             " ORDER BY created_at DESC, id DESC")
@@ -108,6 +111,9 @@ public interface DaoSpamFamily {
 
     @Query("DELETE FROM spam_family_exemplar WHERE family_id = :familyId")
     int deleteExemplars(long familyId);
+
+    @Query("DELETE FROM spam_family_exemplar WHERE account_uuid = :accountUuid")
+    int deleteExemplarsForAccount(String accountUuid);
 
     @Query("DELETE FROM spam_family_exemplar" +
             " WHERE account_uuid = :accountUuid AND source_message_id = :messageId")
@@ -135,6 +141,10 @@ public interface DaoSpamFamily {
             " AND family_id = :familyId")
     int deleteExclusion(String accountUuid, long messageId, long familyId);
 
+    @Query("DELETE FROM spam_family_exclusion" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int deleteExclusionsForMessage(String accountUuid, long messageId);
+
     @Query("SELECT family_id FROM spam_family_exclusion" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     List<Long> getExcludedFamilyIds(String accountUuid, long messageId);
@@ -146,6 +156,9 @@ public interface DaoSpamFamily {
 
     @Query("DELETE FROM spam_family_exclusion WHERE family_id = :familyId")
     int deleteExclusionsForFamily(long familyId);
+
+    @Query("DELETE FROM spam_family_exclusion WHERE account_uuid = :accountUuid")
+    int deleteExclusionsForAccount(String accountUuid);
 
     @Query("UPDATE alias_delivery SET" +
             " predicted_family_id = :familyId," +
@@ -195,9 +208,14 @@ public interface DaoSpamFamily {
             " WHERE account_uuid = :accountUuid" +
             " AND (predicted_family_id = :familyId" +
             "   OR (label = " + EntityAliasDelivery.LABEL_SPAM + " AND family_id = :familyId))" +
-            " ORDER BY CASE WHEN label = " + EntityAliasDelivery.LABEL_SPAM +
-            "   AND family_id = :familyId THEN 0 ELSE 1 END," +
-            " family_score DESC, received DESC" +
+            " ORDER BY" +
+            " CASE WHEN label = " + EntityAliasDelivery.LABEL_HAM + " THEN 0" +
+            "      WHEN label = " + EntityAliasDelivery.LABEL_UNKNOWN + " THEN 1 ELSE 2 END," +
+            " CASE WHEN traffic_verdict = 'SUSPICIOUS' THEN 0" +
+            "      WHEN traffic_verdict IS NULL OR traffic_verdict = 'UNKNOWN' THEN 1 ELSE 2 END," +
+            " spam_support DESC," +
+            " family_score DESC," +
+            " received DESC" +
             " LIMIT :limit")
     List<EntityAliasDelivery> getFamilyCandidates(
             String accountUuid, long familyId, int limit);
@@ -240,4 +258,7 @@ public interface DaoSpamFamily {
 
     @Query("DELETE FROM spam_rescore_task WHERE family_id = :familyId")
     int deleteRescoreTasksForFamily(long familyId);
+
+    @Query("DELETE FROM spam_rescore_task WHERE account_uuid = :accountUuid")
+    int deleteRescoreTasksForAccount(String accountUuid);
 }
