@@ -22,6 +22,7 @@ import java.util.Locale;
  */
 public final class SpamFamilyIdentity {
     private static final String VERSION = "v1";
+    private static final String META_PREFIX = "family_identity:";
 
     private SpamFamilyIdentity() {
     }
@@ -45,10 +46,20 @@ public final class SpamFamilyIdentity {
         return VERSION + ":isolated-message:" + Long.toUnsignedString(messageId);
     }
 
+    public static String globalMetaPrefix() {
+        return META_PREFIX;
+    }
+
+    public static String accountMetaPrefix(String accountUuid) {
+        if (accountUuid == null)
+            return null;
+        return META_PREFIX + accountUuid.trim() + ":";
+    }
+
     public static String metaKey(String accountUuid, String identityKey) {
         if (accountUuid == null || identityKey == null)
             return null;
-        return "family_identity:" + accountUuid.trim() + ":" + identityKey;
+        return accountMetaPrefix(accountUuid) + identityKey;
     }
 
     static String normalize(String value) {
