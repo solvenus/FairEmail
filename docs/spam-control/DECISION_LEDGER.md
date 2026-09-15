@@ -329,81 +329,75 @@ Reply-from-alias regression must remain in the release matrix after Spam Control
 
 ---
 
-## DL-013 — Human “Other spam” is a message-level contradiction of the current family
+## DL-013 — Exact family identity has no per-message “Other spam” override
 
-**STATUS:** OPEN — MUST BE RESOLVED BEFORE CODE CHANGE
+**STATUS:** DECIDED
 
-### Established human meaning
+### Decision
 
-`Other spam` means:
+In production, family membership is definitional: one complete normalized sender-display-name + normalized subject identity maps to one Spam Family.
 
-> This message is Spam, but it does not belong to the currently presented family.
+The old `Annen spam` action belonged to the earlier fuzzy-family review model. It meant “Spam, but not the currently suggested fuzzy group”. Once family identity became deterministic, that action ceased to be a valid family operation. We do not create a per-message exception that contradicts the identity definition.
 
-It must never be translated to HAM.
+`spam_family_exclusion` may remain temporarily in storage/snapshots for backward-compatible recovery, but exact production lookup must ignore it. No production writer may create new message-level family exclusions after the legacy correction subsystem is retired.
 
-### Current semantic conflict
+### Why
 
-- production exact identity maps normalized sender-name + subject to one family;
-- a message-specific exclusion correctly says “not this family”;
-- `matchIdentity()` respects that exclusion;
-- `learnSpamExact()` follows the persistent identity mapping directly;
-- current `Other spam` flow performs exclude/clear/relearn and can therefore return the same message to the excluded identity family.
+A per-message family override would make the core family definition non-deterministic: two messages with the same canonical identity could belong to different families. That would reintroduce ambiguity precisely where exact-family was chosen to eliminate it.
 
-### Forbidden “fixes”
+The capability audit proved that the old `Samme spam / Annen spam / Ikke spam` workflow is confined to the non-exported `githubDebug` fallback lab. The production dashboard instead says that family organization is automatic from sender name + subject and exposes only Spam / Ikke spam in the global review queue.
 
-- re-enable fuzzy family identity;
-- delete/ignore the human exclusion;
-- silently remap the global identity because one message is exceptional;
-- call the exceptional message HAM;
-- implement a patch before choosing the override state model.
+### Must not drift into
 
-### Candidate model to evaluate
+- per-message exact-family overrides;
+- legacy exclusion rows suppressing exact `matchIdentity()`;
+- fuzzy similarity deciding family identity;
+- translating “other spam” to HAM;
+- keeping an unreachable debug workflow alive as semantic authority.
 
-A **per-message family override** appears semantically consistent:
+### Migration rule
 
-1. preserve global account-level exact identity mapping for ordinary twins;
-2. store the negative relation to the rejected family;
-3. keep this message SPAM;
-4. assign the exceptional message to an isolated/per-message family or explicit per-message target without rebinding the global identity;
-5. exact prediction for this message must respect the override/exclusion;
-6. undo/reset must snapshot/restore the override state;
-7. alias family counters mirror the final canonical family only when alias exists.
+The legacy exclusion table is preserved during this ChangeSet so existing undo/reset snapshots remain readable. It becomes inert for exact-family production. Physical schema/table removal is a separate migration with its own snapshot-compatibility plan.
 
-This candidate is **not yet DECIDED**. Before implementation, inspect UI semantics and all callers that mean “assign this one message” versus “rebind this identity”.
+### Required regression evidence
 
-### Required decision tests before implementation
-
-- Other Spam never returns to the rejected family;
-- message remains SPAM;
-- global identity mapping for untouched twins remains unchanged;
-- aliasless message can perform the correction;
-- alias counters mirror only when alias exists;
-- undo is lossless;
-- reset clears learned override while preserving message index.
+- `matchIdentity()` does not consult `spam_family_exclusion`;
+- the legacy Spam Family Lab is not registered as a runtime activity;
+- legacy `confirmSpam`, `markOtherSpam`, `excludeFromFamily`, `SpamFamilyHumanActions` and `SpamFamilyReassigner` runtime paths are absent;
+- exact family learning/prediction still groups equal canonical identities;
+- Spam/HAM review and undo/reset remain intact.
 
 ---
 
-## DL-014 — Explicit assignment vs global identity rebinding are different operations
+## DL-014 — Message labeling and identity-level family binding are distinct operations
 
-**STATUS:** OPEN — MUST BE RESOLVED WITH DL-013
+**STATUS:** DECIDED
 
-### Problem
+### Decision
 
-Current explicit-family path can call `learnSpamIntoFamily(...)` and then bind the message identity key to that family. That turns a message-level assignment into an account-wide identity remap.
+A human message label (`Spam` / `Ikke spam`) is message-level truth. A family binding is identity-level truth.
 
-### Required semantic distinction
+A code path may bind an identity to a family only when the family-id already has exact-identity provenance for that same canonical identity, or when creating the initial exact mapping from that identity. Current legitimate examples are exact learning, exact bulk propagation and exact auto-confirm.
 
-We must decide whether the UI action means:
+A UI action that addresses one message must never silently mean “rebind this canonical identity to a different family”. The old lab's `confirmSpam` / reassign flow is retired rather than repaired because its semantics came from the fuzzy-family model.
 
-A. **Assign this message to this family** — per-message correction, global identity unchanged; or
+### Why
 
-B. **This exact identity belongs to this family** — account-level identity remap, affecting future/twin messages.
+`learnSpamIntoFamily(...)` plus `bindIdentity(...)` is global state. Treating it as a generic one-message correction would alter future/twin messages and violate the user's action scope.
 
-These operations cannot remain conflated.
+### Must not drift into
 
-### Forbidden state
+- arbitrary requested-family IDs from message-level UI;
+- manual one-message correction globally rebinding future exact twins;
+- exact bulk propagation accepting a family without exact provenance;
+- a second family-assignment authority outside the canonical identity mapping.
 
-A UI action worded as one-message correction silently rebinding all future messages with the same exact identity.
+### Required regression evidence
+
+- no legacy message-level family assignment caller remains;
+- exact bulk/auto-confirm source family comes from deterministic exact identity state;
+- equal canonical identities remain bound consistently;
+- explicit HAM is never overwritten by propagation.
 
 ---
 
@@ -426,14 +420,19 @@ Already canonical:
 - rescore paging/prediction authority;
 - reset/undo snapshots for canonical message state.
 
-Not yet fully canonical:
+Current retirement target:
 
+- debug-only `ActivitySpamFamilyLab` fallback;
 - `confirmSpam`;
 - `excludeFromFamily`;
 - `SpamFamilyHumanActions.markOtherSpam`;
 - `SpamFamilyReassigner`;
-- remaining legacy DAO/query surfaces requiring classification.
+- exact lookup's legacy exclusion read.
+
+Preserved compatibility state during this ChangeSet:
+
+- `spam_family_exclusion` schema/DAO/snapshot representation, inert for exact production, until a dedicated schema migration can prove backward-compatible recovery.
 
 ### Rule
 
-Do not call Port A/canonical migration complete until this inventory is empty or every remaining alias path is explicitly classified as a legitimate mirror/enrichment/diagnostic.
+Do not call Port A/canonical migration complete until the retirement target is empty and every remaining alias path is explicitly classified as a legitimate mirror/enrichment/diagnostic.
