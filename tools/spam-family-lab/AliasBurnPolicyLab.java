@@ -1,6 +1,6 @@
 package eu.faircode.email;
 
-/** Zero-dependency regression checks for AliasBurnPolicy. */
+/** Zero-dependency regression checks for advisory AliasBurnPolicy readiness. */
 public final class AliasBurnPolicyLab {
     private static void require(boolean condition, String message) {
         if (!condition)
@@ -12,7 +12,7 @@ public final class AliasBurnPolicyLab {
         AliasBurnPolicy.Result a = AliasBurnPolicy.evaluate(healthy);
         require(a.verdict == AliasBurnPolicy.Verdict.HEALTHY,
                 "alias without confirmed spam must stay healthy");
-        require(!a.burnAllowed, "healthy alias must never be burn-ready");
+        require(!a.burnAllowed, "healthy alias must not be recommended burn-ready");
 
         AliasBurnPolicy.Input spamButNotCompromised = new AliasBurnPolicy.Input();
         spamButNotCompromised.spamHits = 8;
@@ -21,7 +21,7 @@ public final class AliasBurnPolicyLab {
         require(review.verdict == AliasBurnPolicy.Verdict.REVIEW_COMPROMISE,
                 "spam truth alone must not become alias-compromise truth");
         require(!review.compromised && !review.burnAllowed,
-                "unconfirmed compromise must not authorize burn");
+                "unconfirmed compromise must not be recommended burn-ready");
 
         AliasBurnPolicy.Input resolvedHealthySpam = new AliasBurnPolicy.Input();
         resolvedHealthySpam.spamHits = 8;
@@ -40,8 +40,9 @@ public final class AliasBurnPolicyLab {
         leakedService.trustedDomainsConfigured = true;
         AliasBurnPolicy.Result b = AliasBurnPolicy.evaluate(leakedService);
         require(b.verdict == AliasBurnPolicy.Verdict.ROTATE_FIRST,
-                "used compromised service alias must be rotated before burn");
-        require(!b.burnAllowed, "service alias must not burn before replacement");
+                "used compromised service alias should recommend rotation before burn");
+        require(!b.burnAllowed,
+                "rotation-first state must not be marked recommended burn-ready");
 
         AliasBurnPolicy.Input replacementUnverified = new AliasBurnPolicy.Input();
         replacementUnverified.aliasCompromised = true;
@@ -51,9 +52,9 @@ public final class AliasBurnPolicyLab {
         replacementUnverified.replacementConfigured = true;
         AliasBurnPolicy.Result verify = AliasBurnPolicy.evaluate(replacementUnverified);
         require(verify.verdict == AliasBurnPolicy.Verdict.VERIFY_REPLACEMENT,
-                "configured replacement must be observed before burn");
+                "configured replacement should recommend verification before burn");
         require(!verify.burnAllowed,
-                "unverified replacement must never authorize burn");
+                "unverified replacement must not be marked recommended burn-ready");
 
         AliasBurnPolicy.Input replaced = new AliasBurnPolicy.Input();
         replaced.aliasCompromised = true;
@@ -64,18 +65,18 @@ public final class AliasBurnPolicyLab {
         replaced.replacementVerified = true;
         AliasBurnPolicy.Result c = AliasBurnPolicy.evaluate(replaced);
         require(c.verdict == AliasBurnPolicy.Verdict.READY_TO_BURN,
-                "verified replacement should make compromised alias burn-ready");
+                "verified replacement should make compromised alias recommended burn-ready");
         require(c.burnAllowed,
-                "explicit compromise plus verified replacement is the burn gate");
+                "explicit compromise plus verified replacement is recommended-ready");
 
         AliasBurnPolicy.Input unknownLeak = new AliasBurnPolicy.Input();
         unknownLeak.aliasCompromised = true;
         unknownLeak.spamHits = 8;
         AliasBurnPolicy.Result d = AliasBurnPolicy.evaluate(unknownLeak);
         require(d.verdict == AliasBurnPolicy.Verdict.COMPROMISED,
-                "confirmed compromise without replacement remains non-destructive");
+                "confirmed compromise without replacement remains advisory-not-ready");
         require(!d.burnAllowed,
-                "compromise without replacement must remain non-destructive");
+                "missing replacement must keep advisory readiness false");
 
         AliasBurnPolicy.Input pending = new AliasBurnPolicy.Input();
         pending.aliasCompromised = true;
@@ -86,7 +87,7 @@ public final class AliasBurnPolicyLab {
         AliasBurnPolicy.Result e = AliasBurnPolicy.evaluate(pending);
         require(e.verdict == AliasBurnPolicy.Verdict.SERVER_PENDING,
                 "pending remote operation must dominate local readiness");
-        require(!e.burnAllowed, "never launch a second burn while one is pending");
+        require(!e.burnAllowed, "pending server operation is never recommended-ready");
 
         AliasBurnPolicy.Input dead = new AliasBurnPolicy.Input();
         dead.aliasCompromised = true;
@@ -95,7 +96,7 @@ public final class AliasBurnPolicyLab {
         AliasBurnPolicy.Result f = AliasBurnPolicy.evaluate(dead);
         require(f.verdict == AliasBurnPolicy.Verdict.SMTP_DEAD,
                 "verified rejection must be represented as physically dead");
-        require(!f.burnAllowed, "already dead alias is not burn-ready again");
+        require(!f.burnAllowed, "already dead alias is not recommended-ready again");
 
         System.out.println("PASS burn-policy " +
                 a.verdict + "," + review.verdict + "," + resolved.verdict + "," + b.verdict + "," +
