@@ -6,8 +6,9 @@ def patch_file(path_s, replacements):
     text = path.read_text(encoding='utf-8')
     for label, old, new in replacements:
         count = text.count(old)
-        if count != 1:
-            raise SystemExit(f'{path_s} {label}: expected exactly 1 match, got {count}')
+        expected = 2 if label == 'restore account compromise rows' else 1
+        if count != expected:
+            raise SystemExit(f'{path_s} {label}: expected exactly {expected} match(es), got {count}')
         text = text.replace(old, new, 1)
         print('patched', path_s, label)
     path.write_text(text, encoding='utf-8')

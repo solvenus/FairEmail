@@ -27,13 +27,26 @@ public final class AliasCompromiseReviewStore {
         return reviewedAtSpamCount == null || reviewedAtSpamCount < spam;
     }
 
-    public static void markReviewedHealthy(Context context, EntityAlias alias) {
+    public static boolean markReviewedHealthy(Context context, EntityAlias alias) {
         if (context == null || alias == null || alias.account_uuid == null || alias.address == null)
-            return;
+            return false;
+        DaoAlias dao = SpamIntelligenceDB.getInstance(context).alias();
+        String metaKey = key(alias.account_uuid, alias.address);
+        long currentSpam = alias.spam_hits == null ? 0L : alias.spam_hits;
+        Long previous = dao.getMetaLong(metaKey);
+        if (previous != null && previous == currentSpam)
+            return false;
         EntitySpamMeta meta = new EntitySpamMeta();
-        meta.key = key(alias.account_uuid, alias.address);
-        meta.long_value = (long) (alias.spam_hits == null ? 0 : alias.spam_hits);
-        SpamIntelligenceDB.getInstance(context).alias().putMeta(meta);
+        meta.key = metaKey;
+        meta.long_value = currentSpam;
+        dao.putMeta(meta);
+        return true;
+    }
+
+    public static String accountMetaPrefix(String accountUuid) {
+        if (accountUuid == null)
+            return PREFIX;
+        return PREFIX + accountUuid.trim() + ":";
     }
 
     public static String globalMetaPrefix() {

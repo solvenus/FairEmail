@@ -22,6 +22,8 @@ public final class SpamUndoManager {
     public static final String ACTION_OTHER_SPAM = "OTHER_SPAM";
     public static final String ACTION_NOT_SPAM = "NOT_SPAM";
     public static final String ACTION_RENAME = "RENAME";
+    public static final String ACTION_ALIAS_KEEP_ACTIVE = "ALIAS_KEEP_ACTIVE";
+    public static final String ACTION_ALIAS_COMPROMISED = "ALIAS_COMPROMISED";
     public static final String ACTION_RESET_ALL = "RESET_ALL";
 
     public enum UndoResult {
@@ -96,6 +98,37 @@ public final class SpamUndoManager {
             if (historyId != null)
                 db.actions().delete(historyId);
             return SpamFamilyLabRepository.BulkActionResult.rejected();
+        }
+    }
+
+    public static boolean runAccountAction(
+            Context context,
+            String accountUuid,
+            String action,
+            String description,
+            Callable<Boolean> delegate) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty() || delegate == null)
+            return false;
+
+        Context app = context.getApplicationContext();
+        SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(app);
+        Long historyId = null;
+        try {
+            String before = SpamLearningSnapshot.captureAccountAllLearning(
+                    app, accountUuid.trim());
+            historyId = recordBefore(db, accountUuid.trim(), null,
+                    0L, action, description, before);
+            Boolean changed = delegate.call();
+            if (!Boolean.TRUE.equals(changed)) {
+                db.actions().delete(historyId);
+                return false;
+            }
+            return true;
+        } catch (Throwable ex) {
+            Log.e(ex);
+            if (historyId != null)
+                db.actions().delete(historyId);
+            return false;
         }
     }
 

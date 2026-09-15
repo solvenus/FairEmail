@@ -1338,21 +1338,42 @@ public class ActivitySpamControl extends ActivityBase {
         new AlertDialog.Builder(this)
                 .setTitle("Er aliaset kompromittert?")
                 .setMessage(alias.address + "\n\nSpam er bekreftet, men det er ikke nok alene til å konkludere med at aliasadressen har lekket.")
-                .setNegativeButton("Behold aktivt", (d, w) -> {
-                    AliasCompromiseReviewStore.markReviewedHealthy(getApplicationContext(), alias);
-                    tvStatus.setText("Aliaset beholdes aktivt. Ny spam-evidens kan åpne spørsmålet igjen.");
-                    renderCurrent();
-                })
-                .setPositiveButton("Marker kompromittert", (d, w) -> {
-                    executor.execute(() -> {
-                        DaoAlias dao = SpamIntelligenceDB.getInstance(getApplicationContext()).alias();
-                        int changed = dao.markCompromised(alias.account_uuid, alias.address);
-                        runOnUiThread(() -> {
-                            tvStatus.setText(changed > 0 ? "Alias markert kompromittert." : "Aliasstatus var allerede oppdatert.");
-                            renderCurrent();
-                        });
+                .setNegativeButton("Behold aktivt", (d, w) -> executor.execute(() -> {
+                    boolean changed = SpamUndoManager.runAccountAction(
+                            getApplicationContext(), alias.account_uuid,
+                            SpamUndoManager.ACTION_ALIAS_KEEP_ACTIVE,
+                            "Behold alias aktivt",
+                            () -> AliasCompromiseReviewStore.markReviewedHealthy(
+                                    getApplicationContext(), alias));
+                    runOnUiThread(() -> {
+                        tvStatus.setText(changed
+                                ? "Aliaset beholdes aktivt. Ny spam-evidens kan åpne spørsmålet igjen."
+                                : "Aliaset var allerede vurdert som aktivt.");
+                        if (changed)
+                            Snackbar.make(svContent, "Alias beholdt aktivt.", Snackbar.LENGTH_LONG)
+                                    .setAction("ANGRE", v -> undoLatest()).show();
+                        loadDashboardExtras(selectedAccount);
+                        renderCurrent();
                     });
-                })
+                }))
+                .setPositiveButton("Marker kompromittert", (d, w) -> executor.execute(() -> {
+                    boolean changed = SpamUndoManager.runAccountAction(
+                            getApplicationContext(), alias.account_uuid,
+                            SpamUndoManager.ACTION_ALIAS_COMPROMISED,
+                            "Marker alias kompromittert",
+                            () -> SpamIntelligenceDB.getInstance(getApplicationContext()).alias()
+                                    .markCompromised(alias.account_uuid, alias.address) > 0);
+                    runOnUiThread(() -> {
+                        tvStatus.setText(changed
+                                ? "Alias markert kompromittert."
+                                : "Aliasstatus var allerede oppdatert.");
+                        if (changed)
+                            Snackbar.make(svContent, "Alias markert kompromittert.", Snackbar.LENGTH_LONG)
+                                    .setAction("ANGRE", v -> undoLatest()).show();
+                        loadDashboardExtras(selectedAccount);
+                        renderCurrent();
+                    });
+                }))
                 .show();
     }
 
