@@ -6,13 +6,16 @@ on:
       - feature/spam-families
     paths:
       - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
+      - 'app/src/main/java/eu/faircode/email/AliasBurnManager.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainAffinity.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestions.java'
       - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
       - 'app/src/main/java/eu/faircode/email/AliasSenderManager.java'
+      - 'app/src/main/java/eu/faircode/email/AliasServerActuator.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficScorer.java'
+      - 'app/src/main/java/eu/faircode/email/CpanelAliasActuator.java'
       - 'app/src/main/java/eu/faircode/email/DaoAlias.java'
       - 'app/src/main/java/eu/faircode/email/EntityAlias.java'
       - 'app/src/main/java/eu/faircode/email/EntityAliasDelivery.java'
