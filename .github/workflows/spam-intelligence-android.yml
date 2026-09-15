@@ -1,0 +1,38 @@
+name: Spam Intelligence Android Compile
+
+on:
+  push:
+    branches:
+      - feature/spam-families
+    paths:
+      - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
+      - 'app/src/main/java/eu/faircode/email/DaoAlias.java'
+      - 'app/src/main/java/eu/faircode/email/EntityAlias.java'
+      - 'app/src/main/java/eu/faircode/email/EntityAliasDelivery.java'
+      - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
+      - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
+      - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
+      - '.github/workflows/spam-intelligence-android.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Set up JDK 21
+        uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+      - name: Compile GitHub debug Java and Room code
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
+            :app:compileGithubDebugJavaWithJavac
