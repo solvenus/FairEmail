@@ -1,0 +1,31 @@
+name: Verify Spam exact-family retirement contract
+
+on:
+  push:
+    branches:
+      - changeset/spam-control-family-correction-semantics
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/verify_spam_exact_family_retirement.py'
+      - '.github/workflows/verify-spam-exact-family-retirement.yml'
+      - 'docs/spam-control/DECISION_LEDGER.md'
+      - 'app/src/githubDebug/AndroidManifest.xml'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java'
+      - 'app/src/main/java/eu/faircode/email/SpamFamilyHumanActions.java'
+      - 'app/src/main/java/eu/faircode/email/SpamFamilyReassigner.java'
+      - 'app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java'
+      - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
+      - 'app/src/main/java/eu/faircode/email/SpamFamilyStore.java'
+      - 'app/src/main/java/eu/faircode/email/SpamUndoManager.java'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify exact-family retirement semantics
+        run: python3 .github/scripts/verify_spam_exact_family_retirement.py
