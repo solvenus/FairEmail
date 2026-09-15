@@ -111,7 +111,9 @@ public final class SpamFamilyReassigner {
                                 oldFamilyId, targetFamilyId, false);
 
                     long now = System.currentTimeMillis();
-                    if (!target.active)
+                    boolean targetWillHaveModel = exemplar != null ||
+                            familyDao.countExemplars(targetFamilyId) > 0;
+                    if (!target.active && targetWillHaveModel)
                         requireOne(familyDao.setFamilyActive(targetFamilyId, true, now),
                                 "reactivate target family");
 
@@ -143,6 +145,12 @@ public final class SpamFamilyReassigner {
                     requireOne(familyDao.setFamilyStats(
                                     targetFamilyId, targetConfirmed, now),
                             "update target family stats");
+                    if (familyDao.countExemplars(targetFamilyId) == 0) {
+                        requireOne(familyDao.setFamilyActive(targetFamilyId, false, now),
+                                "deactivate model-less target family");
+                        familyDao.clearPredictionsForFamily(targetFamilyId, now);
+                        familyDao.deleteRescoreTasksForFamily(targetFamilyId);
+                    }
 
                     int sourceConfirmed = familyDao.countConfirmedMembers(oldFamilyId);
                     boolean deleted = false;
@@ -154,10 +162,17 @@ public final class SpamFamilyReassigner {
                         requireOne(familyDao.deleteFamily(oldFamilyId),
                                 "delete empty source family");
                         deleted = true;
-                    } else
+                    } else {
                         requireOne(familyDao.setFamilyStats(
                                         oldFamilyId, sourceConfirmed, now),
                                 "update source family stats");
+                        if (familyDao.countExemplars(oldFamilyId) == 0) {
+                            requireOne(familyDao.setFamilyActive(oldFamilyId, false, now),
+                                    "deactivate model-less source family");
+                            familyDao.clearPredictionsForFamily(oldFamilyId, now);
+                            familyDao.deleteRescoreTasksForFamily(oldFamilyId);
+                        }
+                    }
 
                     return new Result(Status.APPLIED,
                             oldFamilyId, targetFamilyId, deleted);
