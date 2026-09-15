@@ -2,8 +2,8 @@
 """Regression contract for Spam Control observability.
 
 A failure that cannot explain what it attempted and what it received is itself a
-product failure.  This protects the Terminal/scan/cPanel instrumentation that was
-added after the real-device bootstrap and UAPI failures.
+product failure. This protects the Terminal/scan/cPanel instrumentation added
+after the real-device bootstrap and UAPI failures.
 """
 from pathlib import Path
 
@@ -32,14 +32,14 @@ require('SpamIntelligence.refreshMessageFamilyState(app, account, message, false
 # Scanner must emit a useful operational trace, not a single success/failure line.
 for token in [
     'SpamControlLog.i(app, "SCAN",',
-    '"START account="',
-    '"< PAGE afterMessageId="',
+    'START account=',
+    '< PAGE afterMessageId=',
     'SpamControlLog.t(app, "SCAN",',
-    '"INDEX message="',
-    '"DONE examined="',
-    '"FAILED examined="',
-    '"noEnvelope="',
-    '"missingFolder="',
+    'INDEX message=',
+    'DONE examined=',
+    'FAILED examined=',
+    'noEnvelope=',
+    'missingFolder=',
 ]:
     require(token in SCAN, 'scanner observability lost: ' + token)
 
@@ -53,10 +53,10 @@ require('messageDao.count(account.uuid)' in UI,
 require('dao.countReviewQueue(' not in UI,
         'historical scan UI regressed to alias-ledger review count')
 for token in [
-    '"UI RESULT sources="',
-    '"review=" + beforeReview + "->" + afterReview',
-    '"indexed=" + beforeIndexed + "->" + afterIndexed',
-    '"noEnvelope=" + result.skippedNoEnvelope',
+    'UI RESULT sources=',
+    'review=" + beforeReview + "->" + afterReview',
+    'indexed=" + beforeIndexed + "->" + afterIndexed',
+    'noEnvelope=" + result.skippedNoEnvelope',
 ]:
     require(token in UI, 'scan UI result telemetry lost: ' + token)
 
@@ -89,14 +89,14 @@ require(request >= 0, 'cPanel request endpoint logging missing')
 require(response >= 0 and shape_check > response,
         'cPanel HTTP/shape telemetry must happen before UAPI result validation')
 for token in [
-    '" final=" + connection.getURL()',
-    '" contentType=" + connection.getContentType()',
-    '" topLevel=" + topLevelKeys(root)',
+    'final=" + connection.getURL()',
+    'contentType=" + connection.getContentType()',
+    'topLevel=" + topLevelKeys(root)',
     'SpamControlLog.t(context, "CPANEL",',
-    '"< BODY " + SpamControlLog.sanitize(body)',
+    '< BODY " + SpamControlLog.sanitize(body)',
     'root.has("cpanelresult")',
     'root.has("metadata") && root.has("data")',
-    '"cPanel UAPI response missing result. endpoint="',
+    'cPanel UAPI response missing result. endpoint=',
 ]:
     require(token in CPANEL, 'cPanel diagnostic shape contract lost: ' + token)
 
