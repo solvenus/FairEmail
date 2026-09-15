@@ -30,6 +30,8 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.cardview.widget.CardView;
 import androidx.lifecycle.LiveData;
 
+import com.google.android.material.snackbar.Snackbar;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -119,6 +121,27 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         tvStatus.setText("Laster e-postkonto …");
         root.addView(tvStatus, matchWrap());
 
+        LinearLayout historyRow = new LinearLayout(this);
+        historyRow.setOrientation(LinearLayout.HORIZONTAL);
+        historyRow.setPadding(0, 0, 0, dp(8));
+
+        Button undo = secondaryButton("Angre siste valg");
+        undo.setOnClickListener(v -> {
+            EntityAccount account = selectedAccount;
+            if (account != null)
+                undoLatest(account);
+        });
+        historyRow.addView(undo, weightedButton());
+
+        Button reset = secondaryButton("Nullstill læring");
+        reset.setOnClickListener(v -> {
+            EntityAccount account = selectedAccount;
+            if (account != null)
+                showResetDialog(account);
+        });
+        historyRow.addView(reset, weightedButton());
+        root.addView(historyRow, matchWrap());
+
         svContent = new ScrollView(this);
         svContent.setFillViewport(true);
 
@@ -180,6 +203,66 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         content.addView(text, matchWrap());
         card.addView(content, matchWrap());
         return card;
+    }
+
+
+    private void undoLatest(EntityAccount account) {
+        if (account == null || account.uuid == null)
+            return;
+        final int scrollY = svContent == null ? 0 : svContent.getScrollY();
+        tvStatus.setText("Angrer siste valg …");
+        executor.execute(() -> {
+            SpamUndoManager.UndoResult result = SpamUndoManager.undoLatest(
+                    getApplicationContext(), account.uuid);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !isSelected(account))
+                    return;
+                if (result == SpamUndoManager.UndoResult.APPLIED) {
+                    tvStatus.setText("Siste valg er angret.");
+                    if (selectedGroup != null && selectedGroupId != null)
+                        loadCandidates(account, selectedGroup, scrollY, false);
+                } else if (result == SpamUndoManager.UndoResult.NOTHING_TO_UNDO)
+                    tvStatus.setText("Det er ingen flere valg å angre.");
+                else
+                    tvStatus.setText("Kunne ikke angre siste valg.");
+            });
+        });
+    }
+
+    private void showResetDialog(EntityAccount account) {
+        new AlertDialog.Builder(this)
+                .setTitle("Nullstill all læring?")
+                .setMessage("Dette sletter spam/ikke-spam-valgene dine, spamgruppene, " +
+                        "modelltreffene og lærte spam-tellere for denne kontoen.\n\n" +
+                        "E-postene dine, aliasadressene, manuelle alias-domener, replacement-status " +
+                        "og SMTP/cPanel-regler blir ikke rørt. Undo-historikken slettes også.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Nullstill", (dialog, which) -> performReset(account))
+                .show();
+    }
+
+    private void performReset(EntityAccount account) {
+        if (account == null || account.uuid == null)
+            return;
+        tvStatus.setText("Nullstiller Spamkontroll …");
+        executor.execute(() -> {
+            boolean reset = SpamResetManager.resetLearning(
+                    getApplicationContext(), account.uuid);
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !isSelected(account))
+                    return;
+                if (reset) {
+                    selectedGroupId = null;
+                    selectedGroup = null;
+                    candidateGeneration.incrementAndGet();
+                    showChooseGroupMessage();
+                    tvStatus.setText("All spam-læring er nullstilt. Du har blanke ark.");
+                    if (svContent != null)
+                        svContent.post(() -> svContent.scrollTo(0, 0));
+                } else
+                    tvStatus.setText("Kunne ikke nullstille læringen.");
+            });
+        });
     }
 
     private void loadAccounts() {
@@ -386,8 +469,22 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("Lagre", (dialog, which) -> {
                     String name = input.getText().toString();
-                    executor.execute(() -> SpamFamilyLabRepository.renameFamily(
-                            getApplicationContext(), group.family_id, name));
+                    EntityAccount account = selectedAccount;
+                    if (account == null || account.uuid == null)
+                        return;
+                    executor.execute(() -> {
+                        boolean changed = SpamUndoManager.renameFamily(
+                                getApplicationContext(), account.uuid, group.family_id, name);
+                        runOnUiThread(() -> {
+                            if (changed) {
+                                tvStatus.setText("Navnet er lagret.");
+                                Snackbar.make(svContent, "Navnet er lagret.", Snackbar.LENGTH_LONG)
+                                        .setAction("ANGRE", v -> undoLatest(account))
+                                        .show();
+                            } else
+                                tvStatus.setText("Kunne ikke endre navnet.");
+                        });
+                    });
                 })
                 .show();
     }
@@ -546,9 +643,13 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                     account, group, candidate,
                     "Lagrer: samme spam …",
                     "Lagret som samme spam.",
-                    () -> SpamFamilyLabRepository.confirmSpam(
+                    () -> SpamUndoManager.runMessageAction(
                             getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId)));
+                            group.family_id, candidate.messageId,
+                            SpamUndoManager.ACTION_SAME_SPAM, "Samme spam",
+                            () -> SpamFamilyLabRepository.confirmSpam(
+                                    getApplicationContext(), account.uuid,
+                                    group.family_id, candidate.messageId))));
             actions.addView(same, weightedButton());
 
             Button other = actionButton("Annen spam");
@@ -556,9 +657,13 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                     account, group, candidate,
                     "Lagrer: annen spam …",
                     "Lagret som spam, men ikke denne spamgruppen.",
-                    () -> SpamFamilyLabRepository.markOtherSpam(
+                    () -> SpamUndoManager.runMessageAction(
                             getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId)));
+                            group.family_id, candidate.messageId,
+                            SpamUndoManager.ACTION_OTHER_SPAM, "Annen spam",
+                            () -> SpamFamilyLabRepository.markOtherSpam(
+                                    getApplicationContext(), account.uuid,
+                                    group.family_id, candidate.messageId))));
             actions.addView(other, weightedButton());
 
             Button legitimate = actionButton(candidate.explicitHam ? "Ikke spam ✓" : "Ikke spam");
@@ -567,8 +672,12 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                     account, group, candidate,
                     "Lagrer: ikke spam …",
                     "Lagret som ikke spam.",
-                    () -> SpamFamilyLabRepository.markLegitimate(
-                            getApplicationContext(), account.uuid, candidate.messageId)));
+                    () -> SpamUndoManager.runMessageAction(
+                            getApplicationContext(), account.uuid,
+                            group.family_id, candidate.messageId,
+                            SpamUndoManager.ACTION_NOT_SPAM, "Ikke spam",
+                            () -> SpamFamilyLabRepository.markLegitimate(
+                                    getApplicationContext(), account.uuid, candidate.messageId))));
             actions.addView(legitimate, weightedButton());
 
             content.addView(actions, matchWrap());
@@ -602,9 +711,12 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 if (isFinishing() || isDestroyed() || !isSelected(account))
                     return;
 
-                if (finalResult == SpamFamilyLabRepository.ActionResult.APPLIED)
+                if (finalResult == SpamFamilyLabRepository.ActionResult.APPLIED) {
                     tvStatus.setText(successText);
-                else
+                    Snackbar.make(svContent, successText, Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest(account))
+                            .show();
+                } else
                     tvStatus.setText(actionFailure(finalResult));
 
                 if (selectedGroupId != null && selectedGroupId == group.family_id)
