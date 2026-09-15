@@ -16,11 +16,13 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.appcompat.app.AlertDialog;
 import androidx.cardview.widget.CardView;
 import androidx.lifecycle.LiveData;
 
@@ -28,14 +30,16 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Debug-build observer console for learned spam families.
  *
- * This activity intentionally exposes no automatic move/delete/burn action.
- * It is an instrumentation surface for measuring family quality on real mail.
+ * Explicit human corrections are allowed here, but this activity intentionally
+ * exposes no automatic move/delete/burn action. It is the measurement and
+ * training surface for family quality on real mail.
  */
 public class ActivitySpamFamilyLab extends ActivityBase {
     private static final int CANDIDATE_LIMIT = 200;
@@ -82,7 +86,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 ViewGroup.LayoutParams.MATCH_PARENT));
 
         TextView intro = new TextView(this);
-        intro.setText("Observer-only. Strong matches are evidence, not automatic spam actions.");
+        intro.setText("Observer-first. Confirm/Not family/Legitimate train evidence only; no automatic move, delete or burn occurs here.");
         intro.setPadding(0, 0, 0, dp(8));
         root.addView(intro, matchWrap());
 
@@ -116,8 +120,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         LinearLayout body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
 
-        TextView familyCaption = caption("Families");
-        body.addView(familyCaption, matchWrap());
+        body.addView(caption("Families"), matchWrap());
         llFamilies = new LinearLayout(this);
         llFamilies.setOrientation(LinearLayout.VERTICAL);
         body.addView(llFamilies, matchWrap());
@@ -211,8 +214,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
     }
 
     private void renderFamilies(EntityAccount account, List<TupleSpamFamilyOverview> families) {
-        if (selectedAccount == null || account.uuid == null ||
-                !account.uuid.equals(selectedAccount.uuid))
+        if (!isSelected(account))
             return;
 
         llFamilies.removeAllViews();
@@ -245,8 +247,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         content.setOrientation(LinearLayout.VERTICAL);
         content.setPadding(dp(12), dp(10), dp(12), dp(10));
 
-        TextView title = caption(familyName(family));
-        content.addView(title, matchWrap());
+        content.addView(caption(familyName(family)), matchWrap());
 
         TextView stats = new TextView(this);
         StringBuilder text = new StringBuilder();
@@ -270,26 +271,46 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
 
-        Button inspect = new Button(this);
-        inspect.setText("Inspect");
+        Button inspect = actionButton("Inspect");
         inspect.setOnClickListener(v -> loadCandidates(account, family));
-        actions.addView(inspect, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        actions.addView(inspect, weightedButton());
 
-        Button rescore = new Button(this);
-        rescore.setText("Rescore");
+        Button rescore = actionButton("Rescore");
         rescore.setOnClickListener(v -> {
             SpamFamilyLabRepository.requestRescore(
                     getApplicationContext(), account.uuid, family.family_id);
             tvStatus.setText("Queued rescore for " + familyName(family));
         });
-        actions.addView(rescore, new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        actions.addView(rescore, weightedButton());
+
+        Button rename = actionButton("Rename");
+        rename.setOnClickListener(v -> showRenameDialog(family));
+        actions.addView(rename, weightedButton());
         content.addView(actions, matchWrap());
 
         card.addView(content, matchWrap());
         card.setOnClickListener(v -> loadCandidates(account, family));
         return card;
+    }
+
+    private void showRenameDialog(TupleSpamFamilyOverview family) {
+        EditText input = new EditText(this);
+        input.setSingleLine(true);
+        input.setHint("Family name");
+        if (family.name != null)
+            input.setText(family.name);
+        input.setSelection(input.getText().length());
+
+        new AlertDialog.Builder(this)
+                .setTitle("Rename Family #" + family.family_id)
+                .setView(input)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Save", (dialog, which) -> {
+                    String name = input.getText().toString();
+                    executor.execute(() -> SpamFamilyLabRepository.renameFamily(
+                            getApplicationContext(), family.family_id, name));
+                })
+                .show();
     }
 
     private void loadCandidates(EntityAccount account, TupleSpamFamilyOverview family) {
@@ -311,14 +332,16 @@ public class ActivitySpamFamilyLab extends ActivityBase {
             }
             final List<SpamFamilyLabRepository.Candidate> result = candidates;
             runOnUiThread(() -> {
-                if (generation != candidateGeneration.get() || isFinishing() || isDestroyed())
+                if (generation != candidateGeneration.get() ||
+                        isFinishing() || isDestroyed() || !isSelected(account))
                     return;
-                renderCandidates(family, result);
+                renderCandidates(account, family, result);
             });
         });
     }
 
-    private void renderCandidates(TupleSpamFamilyOverview family,
+    private void renderCandidates(EntityAccount account,
+                                  TupleSpamFamilyOverview family,
                                   List<SpamFamilyLabRepository.Candidate> candidates) {
         llCandidates.removeAllViews();
 
@@ -332,13 +355,94 @@ public class ActivitySpamFamilyLab extends ActivityBase {
             return;
         }
 
-        for (SpamFamilyLabRepository.Candidate candidate : candidates) {
-            TextView row = new TextView(this);
-            row.setText(candidateText(candidate));
-            row.setTextIsSelectable(true);
-            row.setPadding(dp(10), dp(9), dp(10), dp(9));
-            llCandidates.addView(row, matchWrapWithMargin(0, 0, 0, 4));
+        for (SpamFamilyLabRepository.Candidate candidate : candidates)
+            llCandidates.addView(candidateCard(account, family, candidate),
+                    matchWrapWithMargin(0, 0, 0, 6));
+    }
+
+    private View candidateCard(EntityAccount account,
+                               TupleSpamFamilyOverview family,
+                               SpamFamilyLabRepository.Candidate candidate) {
+        CardView card = new CardView(this);
+        card.setUseCompatPadding(true);
+        card.setRadius(dp(4));
+
+        LinearLayout content = new LinearLayout(this);
+        content.setOrientation(LinearLayout.VERTICAL);
+        content.setPadding(dp(10), dp(9), dp(10), dp(9));
+
+        TextView text = new TextView(this);
+        text.setText(candidateText(candidate));
+        text.setTextIsSelectable(true);
+        content.addView(text, matchWrap());
+
+        if (!candidate.messagePresent) {
+            TextView unavailable = new TextView(this);
+            unavailable.setText("Message body is no longer locally available; training actions disabled.");
+            unavailable.setPadding(0, dp(6), 0, 0);
+            content.addView(unavailable, matchWrap());
+        } else {
+            LinearLayout actions = new LinearLayout(this);
+            actions.setOrientation(LinearLayout.HORIZONTAL);
+            actions.setPadding(0, dp(6), 0, 0);
+
+            Button confirm = actionButton(candidate.confirmedThisFamily ? "Confirmed" : "Confirm");
+            confirm.setEnabled(!candidate.confirmedThisFamily);
+            confirm.setOnClickListener(v -> runCandidateAction(
+                    account, family, candidate, "Confirming spam…",
+                    () -> SpamFamilyLabRepository.confirmSpam(
+                            getApplicationContext(), account.uuid,
+                            family.family_id, candidate.messageId)));
+            actions.addView(confirm, weightedButton());
+
+            Button exclude = actionButton("Not family");
+            exclude.setEnabled(!candidate.confirmedThisFamily);
+            exclude.setOnClickListener(v -> runCandidateAction(
+                    account, family, candidate, "Excluding family…",
+                    () -> SpamFamilyLabRepository.excludeFromFamily(
+                            getApplicationContext(), account.uuid,
+                            family.family_id, candidate.messageId)));
+            actions.addView(exclude, weightedButton());
+
+            Button ham = actionButton(candidate.explicitHam ? "Legitimate ✓" : "Legitimate");
+            ham.setEnabled(!candidate.explicitHam);
+            ham.setOnClickListener(v -> runCandidateAction(
+                    account, family, candidate, "Marking legitimate…",
+                    () -> SpamFamilyLabRepository.markLegitimate(
+                            getApplicationContext(), account.uuid, candidate.messageId)));
+            actions.addView(ham, weightedButton());
+
+            content.addView(actions, matchWrap());
         }
+
+        card.addView(content, matchWrap());
+        return card;
+    }
+
+    private void runCandidateAction(EntityAccount account,
+                                    TupleSpamFamilyOverview family,
+                                    SpamFamilyLabRepository.Candidate candidate,
+                                    String pendingText,
+                                    Callable<SpamFamilyLabRepository.ActionResult> action) {
+        if (!isSelected(account))
+            return;
+        tvStatus.setText(pendingText + " msg " + candidate.messageId);
+        executor.execute(() -> {
+            SpamFamilyLabRepository.ActionResult result;
+            try {
+                result = action.call();
+            } catch (Throwable ex) {
+                Log.e(ex);
+                result = SpamFamilyLabRepository.ActionResult.REJECTED;
+            }
+            SpamFamilyLabRepository.ActionResult finalResult = result;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !isSelected(account))
+                    return;
+                tvStatus.setText("msg " + candidate.messageId + " · " + finalResult.name());
+                loadCandidates(account, family);
+            });
+        });
     }
 
     private String candidateText(SpamFamilyLabRepository.Candidate c) {
@@ -367,6 +471,12 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 (c.senderDomain == null ? "" : " · sender domain " + c.senderDomain);
     }
 
+    private boolean isSelected(EntityAccount account) {
+        return selectedAccount != null && account != null &&
+                selectedAccount.uuid != null &&
+                selectedAccount.uuid.equals(account.uuid);
+    }
+
     private String familyName(TupleSpamFamilyOverview family) {
         if (family.name != null && !family.name.trim().isEmpty())
             return family.name.trim() + " · Family #" + family.family_id;
@@ -388,6 +498,13 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         view.setText(text);
         view.setTextSize(18f);
         return view;
+    }
+
+    private Button actionButton(String text) {
+        Button button = new Button(this);
+        button.setText(text);
+        button.setAllCaps(false);
+        return button;
     }
 
     private String score(Double value) {
@@ -414,6 +531,10 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         return new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
+    }
+
+    private LinearLayout.LayoutParams weightedButton() {
+        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
     }
 
     private LinearLayout.LayoutParams matchWrapWithMargin(int left, int top, int right, int bottom) {
