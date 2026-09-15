@@ -1,0 +1,161 @@
+name: Apply Spam exact-family retirement
+
+on:
+  push:
+    branches:
+      - changeset/spam-control-family-correction-semantics
+    paths:
+      - '.github/workflows/apply-spam-exact-family-retirement.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: changeset/spam-control-family-correction-semantics
+          fetch-depth: 0
+
+      - name: Apply semantic retirement atomically
+        shell: bash
+        run: |
+          set -euo pipefail
+          BASE_HEAD="$(git rev-parse HEAD)"
+          export BASE_HEAD
+
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          root = Path('.')
+
+          def read(path):
+              return (root / path).read_text(encoding='utf-8')
+
+          def write(path, text):
+              (root / path).write_text(text, encoding='utf-8')
+
+          def replace_once(text, old, new, label):
+              n = text.count(old)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 occurrence, found {n}')
+              return text.replace(old, new, 1)
+
+          def remove_regex_once(text, pattern, label):
+              new, n = re.subn(pattern, '', text, count=1, flags=re.S)
+              if n != 1:
+                  raise SystemExit(f'{label}: expected exactly 1 regex match, found {n}')
+              return new
+
+          # 1) Exact family identity is definitional: legacy exclusions are inert.
+          path = 'app/src/main/java/eu/faircode/email/SpamFamilyStore.java'
+          text = read(path)
+          text = replace_once(
+              text,
+              '        if (messageId > 0 && dao.countExclusion(accountUuid, messageId, familyId) > 0)\n'
+              '            return new Match(null, SpamFamilyEngine.Score.ZERO, false);\n\n',
+              '',
+              'SpamFamilyStore legacy exclusion read')
+          write(path, text)
+
+          # 2) Remove the public message-level exclusion writer.
+          path = 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
+          text = read(path)
+          text = remove_regex_once(
+              text,
+              r'    /\*\*\n'
+              r'     \* Explicitly state that one message does not belong to one family without\n'
+              r'     \* claiming the message is legitimate\.\n'
+              r'     \*/\n'
+              r'    public static boolean excludeFromFamily\(.*?\n'
+              r'    \}\n\n(?=    private static void setLabel)',
+              'SpamIntelligence.excludeFromFamily')
+          write(path, text)
+
+          # 3) Remove legacy fuzzy-lab correction operations from the shared repository.
+          path = 'app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java'
+          text = read(path)
+          text = remove_regex_once(
+              text,
+              r'    /\*\* Explicitly confirm this locally available message as spam in this exact group\. \*/\n'
+              r'    public static ActionResult confirmSpam\(.*?\n'
+              r'    public static ActionResult markOtherSpam\(.*?\n'
+              r'    \}\n\n(?=    public static ActionResult markLegitimate)',
+              'SpamFamilyLabRepository confirm/other-spam block')
+          text = remove_regex_once(
+              text,
+              r'    public static ActionResult excludeFromFamily\(.*?\n'
+              r'    \}\n\n(?=    public static void renameFamily)',
+              'SpamFamilyLabRepository.excludeFromFamily')
+          write(path, text)
+
+          # 4) Undo vocabulary follows live product actions only.
+          path = 'app/src/main/java/eu/faircode/email/SpamUndoManager.java'
+          text = read(path)
+          text = replace_once(text,
+              '    public static final String ACTION_SAME_SPAM = "SAME_SPAM";\n', '',
+              'SpamUndoManager ACTION_SAME_SPAM')
+          text = replace_once(text,
+              '    public static final String ACTION_OTHER_SPAM = "OTHER_SPAM";\n', '',
+              'SpamUndoManager ACTION_OTHER_SPAM')
+          write(path, text)
+
+          # 5) ActivitySpamControl is the sole githubDebug Spam Control entrypoint.
+          path = 'app/src/githubDebug/AndroidManifest.xml'
+          text = read(path)
+          old = '''\n        <!-- Kept as a non-launcher fallback while the new dashboard is exercised. -->\n        <activity\n            android:name=".ActivitySpamFamilyLab"\n            android:exported="false"\n            android:label="Spamkontroll Lab"\n            android:launchMode="singleTask"\n            android:resizeableActivity="true" />\n'''
+          text = replace_once(text, old, '', 'githubDebug legacy fallback activity')
+          write(path, text)
+
+          # 6) Entrypoint contract now protects sole dashboard authority.
+          path = '.github/workflows/audit-spam-control-entrypoints.yml'
+          text = read(path)
+          old_step = '''      - name: Prove old lab has no competing internal entrypoint\n        run: |\n          set -euo pipefail\n          OUT="$(mktemp)"\n          git grep -n 'ActivitySpamFamilyLab' -- app \\\n            ':!app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java' \\\n            ':!app/src/githubDebug/AndroidManifest.xml' > "$OUT" || true\n          if [ -s "$OUT" ]; then\n            echo 'Unexpected references to old Spam Family Lab:' >&2\n            cat "$OUT" >&2\n            exit 1\n          fi\n          echo 'PASS: old lab is not linked from any other app source'\n\n          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml\n          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml\n          grep -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml\n          grep -A4 -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml | grep -F 'android:exported="false"'\n          echo 'PASS: ActivitySpamControl is launcher; old lab is non-exported fallback only'\n'''
+          new_step = '''      - name: Prove Spam Control has one runtime entrypoint\n        run: |\n          set -euo pipefail\n          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml\n          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml\n          if git grep -n -F 'ActivitySpamFamilyLab' -- app/src; then\n            echo 'Legacy Spam Family Lab must not exist in runtime source or manifest' >&2\n            exit 1\n          fi\n          echo 'PASS: ActivitySpamControl is the sole Spam Control runtime entrypoint'\n'''
+          text = replace_once(text, old_step, new_step, 'entrypoint contract')
+          write(path, text)
+          PY
+
+          git rm \
+            app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java \
+            app/src/main/java/eu/faircode/email/SpamFamilyHumanActions.java \
+            app/src/main/java/eu/faircode/email/SpamFamilyReassigner.java \
+            .github/workflows/audit-spam-family-correction-callers.yml \
+            .github/workflows/audit-spam-family-legacy-state.yml \
+            .github/workflows/apply-spam-human-ux-followup.yml
+
+          echo '=== Retirement contract ==='
+          python3 .github/scripts/verify_spam_exact_family_retirement.py
+          echo '=== Reset/undo contract ==='
+          python3 .github/scripts/verify_spam_control_reset_undo_contract.py
+          echo '=== CI coverage contract ==='
+          python3 .github/scripts/verify_spam_control_ci_coverage.py
+          git diff --check
+
+          echo '=== Scoped diff ==='
+          git status --short
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+          git fetch origin changeset/spam-control-family-correction-semantics
+          REMOTE_HEAD="$(git rev-parse origin/changeset/spam-control-family-correction-semantics)"
+          if [ "$REMOTE_HEAD" != "$BASE_HEAD" ]; then
+            echo "Branch moved during ChangeSet: base=$BASE_HEAD remote=$REMOTE_HEAD" >&2
+            exit 1
+          fi
+
+          git add \
+            app/src/main/java/eu/faircode/email/SpamFamilyStore.java \
+            app/src/main/java/eu/faircode/email/SpamIntelligence.java \
+            app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java \
+            app/src/main/java/eu/faircode/email/SpamUndoManager.java \
+            app/src/githubDebug/AndroidManifest.xml \
+            .github/workflows/audit-spam-control-entrypoints.yml
+          git diff --cached --quiet && { echo 'No retirement changes to commit'; exit 1; }
+          git commit -m 'Retire legacy fuzzy family correction semantics'
+          git push origin HEAD:changeset/spam-control-family-correction-semantics
