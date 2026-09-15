@@ -11,6 +11,8 @@ package eu.faircode.email;
 
 import android.content.Context;
 
+import java.util.Locale;
+
 /**
  * Narrow integration facade between FairEmail and the custom intelligence
  * subsystem. Mail synchronization should only need to call this facade.
@@ -37,7 +39,7 @@ public final class SpamIntelligence {
         }
     }
 
-    /** Record envelope-alias metadata once the FairEmail message has a DB id. */
+    /** Record envelope alias and sender-domain evidence once the message has a DB id. */
     public static void observeMessage(Context context,
                                       EntityAccount account,
                                       EntityFolder folder,
@@ -47,17 +49,100 @@ public final class SpamIntelligence {
                     message.id == null || account.uuid == null || message.deliveredto == null)
                 return;
 
+            AliasDomainAffinity.Evidence evidence = AliasDomainAffinity.fromMessage(context, message);
             SpamAliasStore.observeDelivery(
                     context,
                     account.uuid,
                     message.id,
                     message.deliveredto,
                     message.received,
-                    folder.type);
+                    folder.type,
+                    evidence.senderDomain,
+                    evidence.unsubscribe);
         } catch (Throwable ex) {
             // Intelligence must never be able to break mail synchronization.
             Log.e(ex);
         }
+    }
+
+    /**
+     * True only for an alias actually observed for this FairEmail account.
+     * This lets automatic replies use an envelope alias without opening the
+     * identity to arbitrary sender editing.
+     */
+    public static boolean isKnownAlias(Context context,
+                                       EntityIdentity identity,
+                                       String address) {
+        try {
+            if (context == null || identity == null || identity.account == null)
+                return false;
+
+            String alias = AliasRegistry.normalizeAddress(address);
+            String identityAddress = AliasRegistry.normalizeAddress(identity.email);
+            if (alias == null || identityAddress == null)
+                return false;
+
+            String aliasDomain = emailDomain(alias);
+            String identityDomain = emailDomain(identityAddress);
+            if (aliasDomain == null || !aliasDomain.equalsIgnoreCase(identityDomain))
+                return false;
+
+            if (alias.equalsIgnoreCase(identityAddress))
+                return true;
+
+            EntityAccount account = DB.getInstance(context).account().getAccount(identity.account);
+            if (account == null || account.uuid == null)
+                return false;
+
+            EntityAlias known = SpamIntelligenceDB.getInstance(context)
+                    .alias().getAlias(account.uuid, alias);
+            return known != null && known.state != EntityAlias.STATE_DISABLED;
+        } catch (Throwable ex) {
+            Log.e(ex);
+            return false;
+        }
+    }
+
+    /** Resolve the plain local-part FairEmail sender-extra value for an observed alias. */
+    public static String resolveReplyExtra(Context context,
+                                           EntityIdentity identity,
+                                           String deliveredTo) {
+        String alias = AliasRegistry.normalizeAddress(deliveredTo);
+        String identityAddress = AliasRegistry.normalizeAddress(identity == null ? null : identity.email);
+        if (alias == null || identityAddress == null || !isKnownAlias(context, identity, alias))
+            return null;
+
+        int aat = alias.lastIndexOf('@');
+        int iat = identityAddress.lastIndexOf('@');
+        if (aat <= 0 || iat <= 0)
+            return null;
+        String local = alias.substring(0, aat);
+        String identityLocal = identityAddress.substring(0, iat);
+        return local.equalsIgnoreCase(identityLocal) ? null : local;
+    }
+
+    /**
+     * Permit sender-extra semantics either through FairEmail's own setting or
+     * through an exact alias present in the local Alias Registry.
+     */
+    public static boolean permitsExtra(Context context,
+                                       EntityIdentity identity,
+                                       String extra) {
+        if (identity == null || extra == null)
+            return false;
+        if (identity.sender_extra)
+            return true;
+
+        String value = extra.trim();
+        // Our registry-backed path intentionally supports only a plain local-part.
+        // FairEmail's +extra/@extra/name forms remain governed by sender_extra.
+        if (value.isEmpty() || value.startsWith("+") || value.startsWith("@") || value.contains(","))
+            return false;
+
+        String domain = emailDomain(identity.email);
+        if (domain == null)
+            return false;
+        return isKnownAlias(context, identity, value + "@" + domain);
     }
 
     public static void learnSpam(Context context,
@@ -98,5 +183,14 @@ public final class SpamIntelligence {
         } catch (Throwable ex) {
             Log.e(ex);
         }
+    }
+
+    private static String emailDomain(String address) {
+        if (address == null)
+            return null;
+        int at = address.lastIndexOf('@');
+        if (at <= 0 || at + 1 >= address.length())
+            return null;
+        return address.substring(at + 1).toLowerCase(Locale.ROOT);
     }
 }
