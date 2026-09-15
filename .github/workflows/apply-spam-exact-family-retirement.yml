@@ -1,5 +1,5 @@
 name: Apply Spam exact-family retirement
-# Shallow, race-safe atomic retirement ChangeSet.
+# Shallow, race-safe atomic runtime retirement. Workflow governance is committed directly.
 
 on:
   push:
@@ -26,7 +26,6 @@ jobs:
         run: |
           set -euo pipefail
           BASE_HEAD="$(git rev-parse HEAD)"
-          export BASE_HEAD
 
           python3 - <<'PY'
           from pathlib import Path
@@ -106,22 +105,12 @@ jobs:
           old = '''\n        <!-- Kept as a non-launcher fallback while the new dashboard is exercised. -->\n        <activity\n            android:name=".ActivitySpamFamilyLab"\n            android:exported="false"\n            android:label="Spamkontroll Lab"\n            android:launchMode="singleTask"\n            android:resizeableActivity="true" />\n'''
           text = replace_once(text, old, '', 'githubDebug legacy fallback activity')
           write(path, text)
-
-          path = '.github/workflows/audit-spam-control-entrypoints.yml'
-          text = read(path)
-          old_step = '''      - name: Prove old lab has no competing internal entrypoint\n        run: |\n          set -euo pipefail\n          OUT="$(mktemp)"\n          git grep -n 'ActivitySpamFamilyLab' -- app \\\n            ':!app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java' \\\n            ':!app/src/githubDebug/AndroidManifest.xml' > "$OUT" || true\n          if [ -s "$OUT" ]; then\n            echo 'Unexpected references to old Spam Family Lab:' >&2\n            cat "$OUT" >&2\n            exit 1\n          fi\n          echo 'PASS: old lab is not linked from any other app source'\n\n          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml\n          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml\n          grep -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml\n          grep -A4 -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml | grep -F 'android:exported="false"'\n          echo 'PASS: ActivitySpamControl is launcher; old lab is non-exported fallback only'\n'''
-          new_step = '''      - name: Prove Spam Control has one runtime entrypoint\n        run: |\n          set -euo pipefail\n          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml\n          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml\n          if git grep -n -F 'ActivitySpamFamilyLab' -- app/src; then\n            echo 'Legacy Spam Family Lab must not exist in runtime source or manifest' >&2\n            exit 1\n          fi\n          echo 'PASS: ActivitySpamControl is the sole Spam Control runtime entrypoint'\n'''
-          text = replace_once(text, old_step, new_step, 'entrypoint contract')
-          write(path, text)
           PY
 
           git rm \
             app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java \
             app/src/main/java/eu/faircode/email/SpamFamilyHumanActions.java \
-            app/src/main/java/eu/faircode/email/SpamFamilyReassigner.java \
-            .github/workflows/audit-spam-family-correction-callers.yml \
-            .github/workflows/audit-spam-family-legacy-state.yml \
-            .github/workflows/apply-spam-human-ux-followup.yml
+            app/src/main/java/eu/faircode/email/SpamFamilyReassigner.java
 
           echo '=== Retirement contract ==='
           python3 .github/scripts/verify_spam_exact_family_retirement.py
@@ -131,7 +120,7 @@ jobs:
           python3 .github/scripts/verify_spam_control_contract_coverage.py
           git diff --check
 
-          echo '=== Scoped diff ==='
+          echo '=== Scoped runtime diff ==='
           git status --short
 
           git config user.name 'github-actions[bot]'
@@ -149,8 +138,7 @@ jobs:
             app/src/main/java/eu/faircode/email/SpamIntelligence.java \
             app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java \
             app/src/main/java/eu/faircode/email/SpamUndoManager.java \
-            app/src/githubDebug/AndroidManifest.xml \
-            .github/workflows/audit-spam-control-entrypoints.yml
+            app/src/githubDebug/AndroidManifest.xml
           git diff --cached --quiet && { echo 'No retirement changes to commit'; exit 1; }
           git commit -m 'Retire legacy fuzzy family correction semantics'
           git push origin HEAD:changeset/spam-control-family-correction-semantics
