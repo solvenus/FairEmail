@@ -101,7 +101,7 @@ public class ActivitySpamControl extends ActivityBase {
     private List<EntityAlias> aliases = Collections.emptyList();
 
     private List<SpamFamilyLabRepository.Candidate> reviewQueue = new ArrayList<>();
-    private int aliasBucketSelection = 0; // 0=spam/problem, 1=legitimate, 2=unresolved
+    private int aliasBucketSelection = 0; // 0=spam/problem, 1=legitimate, 2=unresolved, 3=inactive
     private int reviewIndex = 0;
     private boolean reviewLoading = false;
     private int reviewCount = 0;
@@ -207,7 +207,7 @@ public class ActivitySpamControl extends ActivityBase {
     }
 
     private void openAliasBucket(int bucket) {
-        aliasBucketSelection = Math.max(0, Math.min(2, bucket));
+        aliasBucketSelection = Math.max(0, Math.min(3, bucket));
         setSection(Section.ALIASES);
     }
 
