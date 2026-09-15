@@ -51,6 +51,9 @@ public final class SpamHistoricalScanner {
         int missingFolder = 0;
         Map<Long, EntityFolder> folderCache = new HashMap<>();
 
+        SpamControlLog.i(app, "SCAN",
+                "START account=" + account.uuid +
+                        " inbox=" + includeInbox + " junk=" + includeJunk);
         try {
             while (true) {
                 List<EntityMessage> page = mail.message().getSpamControlHistoricalPage(
@@ -107,11 +110,24 @@ public final class SpamHistoricalScanner {
             SpamFamilyRescorer.enqueueAllActive(app, account.uuid);
             SpamFamilyRescorer.start(app);
 
-            return new Result(true, null, examined, observed, newlyImported,
+            Result result = new Result(true, null, examined, observed, newlyImported,
                     inbox, junk, skippedNoEnvelope, missingFolder);
+            SpamControlLog.i(app, "SCAN",
+                    "DONE examined=" + examined + " observed=" + observed +
+                            " new=" + newlyImported + " existing=" + Math.max(0, observed - newlyImported) +
+                            " inbox=" + inbox + " junk=" + junk +
+                            " noEnvelope=" + skippedNoEnvelope +
+                            " missingFolder=" + missingFolder);
+            return result;
         } catch (Throwable ex) {
             Log.e(ex);
-            return new Result(false, ex.getClass().getSimpleName(), examined, observed,
+            SpamControlLog.e(app, "SCAN",
+                    "FAILED examined=" + examined + " observed=" + observed +
+                            " new=" + newlyImported + " inbox=" + inbox + " junk=" + junk +
+                            " noEnvelope=" + skippedNoEnvelope +
+                            " missingFolder=" + missingFolder, ex);
+            return new Result(false, ex.getClass().getSimpleName() + ": " +
+                    String.valueOf(ex.getMessage()), examined, observed,
                     newlyImported, inbox, junk, skippedNoEnvelope, missingFolder);
         }
     }
