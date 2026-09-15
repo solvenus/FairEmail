@@ -81,10 +81,14 @@ for token in [
 ]:
     require(token in LOG, 'diagnostic log capability lost: ' + token)
 
-# cPanel must capture response shape before parser failure.
-request = CPANEL.find('SpamControlLog.d(context, "CPANEL",\n                "> GET "')
-response = CPANEL.find('SpamControlLog.d(context, "CPANEL",\n                    "< HTTP "')
-shape_check = CPANEL.find('JSONObject result = root.optJSONObject("result")')
+# cPanel must capture response shape before parser failure INSIDE call().
+call_start = CPANEL.find('private JSONObject call(String module, String function, Map<String, String> args)')
+call_end = CPANEL.find('\n    private static String topLevelKeys', call_start)
+require(call_start >= 0 and call_end > call_start, 'cPanel call() method boundaries not found')
+CALL = CPANEL[call_start:call_end]
+request = CALL.find('SpamControlLog.d(context, "CPANEL",\n                "> GET "')
+response = CALL.find('SpamControlLog.d(context, "CPANEL",\n                    "< HTTP "')
+shape_check = CALL.find('JSONObject result = root.optJSONObject("result")')
 require(request >= 0, 'cPanel request endpoint logging missing')
 require(response >= 0 and shape_check > response,
         'cPanel HTTP/shape telemetry must happen before UAPI result validation')
@@ -94,6 +98,9 @@ for token in [
     'topLevel=" + topLevelKeys(root)',
     'SpamControlLog.t(context, "CPANEL",',
     '< BODY " + SpamControlLog.sanitize(body)',
+]:
+    require(token in CALL, 'cPanel call telemetry lost: ' + token)
+for token in [
     'root.has("cpanelresult")',
     'root.has("metadata") && root.has("data")',
     'cPanel UAPI response missing result. endpoint=',
