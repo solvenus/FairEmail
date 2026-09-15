@@ -176,6 +176,18 @@ public final class SpamFamilyRescorer {
                 if (fingerprint == null)
                     continue;
 
+                // A user exclusion is stronger than observer similarity. If this
+                // family currently owns the prediction, immediately recompute the
+                // competition without it; otherwise this family is simply skipped.
+                if (dao.countExclusion(task.account_uuid, delivery.message_id,
+                        task.family_id) > 0) {
+                    if (delivery.predicted_family_id != null &&
+                            delivery.predicted_family_id == task.family_id)
+                        applyBestMatch(context, dao, task.account_uuid,
+                                delivery.message_id, fingerprint);
+                    continue;
+                }
+
                 SpamFamilyEngine.Score candidate = matcher.score(fingerprint);
                 if (candidate.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD)
                     matches++;
@@ -248,7 +260,8 @@ public final class SpamFamilyRescorer {
                                        String accountUuid,
                                        long messageId,
                                        SpamFamilyFingerprint fingerprint) {
-        SpamFamilyStore.Match best = SpamFamilyStore.match(context, accountUuid, fingerprint);
+        SpamFamilyStore.Match best = SpamFamilyStore.matchForMessage(
+                context, accountUuid, messageId, fingerprint);
         long assessedAt = System.currentTimeMillis();
         if (best.familyId == null)
             dao.clearFamilyMatch(accountUuid, messageId, assessedAt);
