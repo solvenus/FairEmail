@@ -218,13 +218,16 @@ public final class SpamIntelligence {
             if (!changed) {
                 if (familyLearn != null && familyLearn.learned &&
                         before.label != EntityAliasDelivery.LABEL_SPAM)
-                    SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
+                    SpamFamilyStore.unlearnMessage(
+                            context, account.uuid, message.id, familyLearn.familyId);
                 return;
             }
 
-            if (label != EntityAliasDelivery.LABEL_SPAM &&
-                    before.label == EntityAliasDelivery.LABEL_SPAM)
-                SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
+            if (label == EntityAliasDelivery.LABEL_SPAM && familyId != null)
+                SpamFamilyStore.reconcileFamily(context, familyId);
+            else if (before.label == EntityAliasDelivery.LABEL_SPAM)
+                SpamFamilyStore.unlearnMessage(
+                        context, account.uuid, message.id, before.family_id);
 
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
