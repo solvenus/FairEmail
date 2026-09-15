@@ -1,0 +1,38 @@
+name: Apply Envelope-To Reply Alias Patch
+
+on:
+  push:
+    branches:
+      - feature/spam-families
+    paths:
+      - '.github/scripts/apply_envelope_reply_alias_patch.py'
+      - '.github/workflows/apply-envelope-reply-alias-patch.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/spam-families
+          fetch-depth: 1
+      - name: Apply guarded patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply_envelope_reply_alias_patch.py
+      - name: Commit patch if needed
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- app/src/main/java/eu/faircode/email/FragmentCompose.java; then
+            echo 'No patch commit needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/eu/faircode/email/FragmentCompose.java
+          git commit -m 'Prefer Envelope-To alias when replying'
+          git push origin HEAD:feature/spam-families
