@@ -36,6 +36,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamControlPolicy.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
+      - 'app/src/main/java/eu/faircode/email/SpamNetworkAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntentObserver.java'
