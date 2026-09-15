@@ -168,14 +168,22 @@ public final class SpamFamilyReassigner {
             return new Result(Status.FAILED, null, targetFamilyId, false);
         }
 
-        if (result.status == Status.APPLIED) {
-            refreshPrediction(app, accountUuid, message);
-            SpamFamilyRescorer.enqueue(app, accountUuid, targetFamilyId);
-            if (result.oldFamilyId != null) {
-                if (result.oldFamilyDeleted)
-                    SpamFamilyRescorer.enqueueAllActive(app, accountUuid);
-                else
-                    SpamFamilyRescorer.enqueue(app, accountUuid, result.oldFamilyId);
+        if (result.applied()) {
+            try {
+                refreshPrediction(app, accountUuid, message);
+                SpamFamilyRescorer.enqueue(app, accountUuid, targetFamilyId);
+                if (result.status == Status.APPLIED &&
+                        result.oldFamilyId != null &&
+                        result.oldFamilyId != targetFamilyId) {
+                    if (result.oldFamilyDeleted)
+                        SpamFamilyRescorer.enqueueAllActive(app, accountUuid);
+                    else
+                        SpamFamilyRescorer.enqueue(app, accountUuid, result.oldFamilyId);
+                }
+            } catch (Throwable ex) {
+                // The transaction is already committed. Post-commit observer
+                // refresh must never turn a successful correction into a lie.
+                Log.e(ex);
             }
         }
         return result;
