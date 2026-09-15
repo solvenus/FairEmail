@@ -129,6 +129,17 @@ public interface DaoAlias {
             " WHERE account_uuid = :accountUuid AND address = :address")
     int countDeliveries(String accountUuid, String address);
 
+    @Query("SELECT COUNT(*) FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND address = :address" +
+            " AND label = :label")
+    int countAliasLabel(String accountUuid, String address, int label);
+
+    @Query("SELECT COUNT(*) FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND address = :address" +
+            " AND sender_domain = :senderDomain AND label = :label")
+    int countSenderDomainLabel(String accountUuid, String address,
+                               String senderDomain, int label);
+
     @Query("DELETE FROM alias_delivery WHERE account_uuid = :accountUuid")
     int deleteDeliveries(String accountUuid);
 
