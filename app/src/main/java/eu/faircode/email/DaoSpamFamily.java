@@ -187,8 +187,11 @@ public interface DaoSpamFamily {
 
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
-            " AND predicted_family_id = :familyId" +
-            " ORDER BY family_score DESC, received DESC" +
+            " AND (predicted_family_id = :familyId" +
+            "   OR (label = " + EntityAliasDelivery.LABEL_SPAM + " AND family_id = :familyId))" +
+            " ORDER BY CASE WHEN label = " + EntityAliasDelivery.LABEL_SPAM +
+            "   AND family_id = :familyId THEN 0 ELSE 1 END," +
+            " family_score DESC, received DESC" +
             " LIMIT :limit")
     List<EntityAliasDelivery> getFamilyCandidates(
             String accountUuid, long familyId, int limit);
