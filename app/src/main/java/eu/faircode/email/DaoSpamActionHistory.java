@@ -19,6 +19,11 @@ public interface DaoSpamActionHistory {
     long insert(EntitySpamActionHistory action);
 
     @Query("SELECT * FROM spam_action_history" +
+            " WHERE undone_at IS NULL" +
+            " ORDER BY id DESC LIMIT 1")
+    EntitySpamActionHistory getLatestUndoable();
+
+    @Query("SELECT * FROM spam_action_history" +
             " WHERE account_uuid = :accountUuid AND undone_at IS NULL" +
             " ORDER BY id DESC LIMIT 1")
     EntitySpamActionHistory getLatestUndoable(String accountUuid);
