@@ -11,6 +11,8 @@ package eu.faircode.email;
 
 import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.TextUtils;
@@ -73,7 +75,8 @@ public class ActivitySpamControl extends ActivityBase {
         ALIASES("Aliaser"),
         FAMILIES("Spamgrupper"),
         RULES("Regler"),
-        SETTINGS("Innstillinger");
+        SETTINGS("Innstillinger"),
+        TERMINAL("Terminal");
 
         final String title;
         Section(String title) { this.title = title; }
@@ -108,6 +111,21 @@ public class ActivitySpamControl extends ActivityBase {
     private int reviewCount = 0;
     private boolean descriptorsLoading = false;
 
+    private final Handler terminalHandler = new Handler(Looper.getMainLooper());
+    private TextView terminalOutput;
+    private boolean terminalLive = true;
+    private int terminalVerbosity = 2; // 0 ERROR, 1 WARN, 2 INFO, 3 DEBUG, 4 TRACE
+    private String terminalSearch = "";
+    private final Runnable terminalRefresh = new Runnable() {
+        @Override
+        public void run() {
+            if (section != Section.TERMINAL || !terminalLive || isFinishing() || isDestroyed())
+                return;
+            refreshTerminalOutput();
+            terminalHandler.postDelayed(this, 1000L);
+        }
+    };
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -129,6 +147,12 @@ public class ActivitySpamControl extends ActivityBase {
             return true;
         }
         return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onDestroy() {
+        terminalHandler.removeCallbacks(terminalRefresh);
+        super.onDestroy();
     }
 
     private View buildUi() {
@@ -198,12 +222,15 @@ public class ActivitySpamControl extends ActivityBase {
     }
 
     private void setSection(Section next) {
+        terminalHandler.removeCallbacks(terminalRefresh);
         section = next;
         updateNav();
         if (next == Section.REVIEW && selectedAccount != null)
             loadReviewQueue(selectedAccount, reviewQueue.isEmpty());
         else
             renderCurrent();
+        if (next == Section.TERMINAL && terminalLive)
+            terminalHandler.post(terminalRefresh);
         svContent.post(() -> svContent.scrollTo(0, 0));
     }
 
@@ -240,6 +267,9 @@ public class ActivitySpamControl extends ActivityBase {
                 break;
             case SETTINGS:
                 renderSettings();
+                break;
+            case TERMINAL:
+                renderTerminal();
                 break;
             case OVERVIEW:
             default:
@@ -1901,25 +1931,33 @@ public class ActivitySpamControl extends ActivityBase {
         tvStatus.setText("Skanner eksisterende " +
                 (inbox && junk ? "Spam + Innboks" : junk ? "Spam" : "Innboks") + " …");
         executor.execute(() -> {
-            DaoAlias dao = SpamIntelligenceDB.getInstance(getApplicationContext()).alias();
+            SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(getApplicationContext());
+            DaoAlias dao = intelligence.alias();
+            DaoSpamMessage messageDao = intelligence.message();
             boolean includeReviewed = !SpamControlPolicy.hideReviewed(getApplicationContext());
-            int beforeReview = dao.countReviewQueue(account.uuid, includeReviewed);
+            int beforeReview = messageDao.countReviewQueue(account.uuid, includeReviewed);
+            int beforeIndexed = messageDao.count(account.uuid);
             List<EntityAlias> beforeAliasesList = dao.getAliases(account.uuid);
             int beforeAliases = beforeAliasesList == null ? 0 : beforeAliasesList.size();
 
             SpamHistoricalScanner.Result result = SpamHistoricalScanner.scan(
                     getApplicationContext(), account, inbox, junk);
 
-            int afterReview = dao.countReviewQueue(account.uuid, includeReviewed);
+            int afterReview = messageDao.countReviewQueue(account.uuid, includeReviewed);
+            int afterIndexed = messageDao.count(account.uuid);
             List<EntityAlias> afterAliasesList = dao.getAliases(account.uuid);
             int afterAliases = afterAliasesList == null ? 0 : afterAliasesList.size();
             String sources = inbox && junk ? "Spam + Innboks" : junk ? "Spam" : "Innboks";
             SpamControlLog.i(getApplicationContext(), "SCAN",
                     "UI RESULT sources=" + sources +
                             " review=" + beforeReview + "->" + afterReview +
+                            " indexed=" + beforeIndexed + "->" + afterIndexed +
                             " aliases=" + beforeAliases + "->" + afterAliases +
-                            " examined=" + result.examined + " observed=" + result.observed +
-                            " new=" + result.newlyImported +
+                            " examined=" + result.examined +
+                            " indexedThisScan=" + result.indexed +
+                            " newlyIndexed=" + result.newlyIndexed +
+                            " aliasObserved=" + result.observed +
+                            " aliasNew=" + result.newlyImported +
                             " noEnvelope=" + result.skippedNoEnvelope +
                             " missingFolder=" + result.missingFolder);
 
@@ -1929,21 +1967,23 @@ public class ActivitySpamControl extends ActivityBase {
                 if (result.success) {
                     StringBuilder report = new StringBuilder();
                     report.append("Kilde: ").append(sources)
-                            .append("\nLest: ").append(result.examined)
-                            .append("\nRe-evaluert med Envelope-To: ").append(result.observed)
-                            .append("\nNye observasjoner: ").append(result.newlyImported)
-                            .append("\nAllerede kjent / re-evaluert: ")
-                            .append(Math.max(0, result.observed - result.newlyImported))
+                            .append("\nRå meldinger lest: ").append(result.examined)
+                            .append("\nCanonical message-state indeksert: ").append(result.indexed)
+                            .append("\nNye canonical meldinger: ").append(result.newlyIndexed)
+                            .append("\nAlias-beriket med Envelope-To: ").append(result.observed)
+                            .append("\nNye alias-observasjoner: ").append(result.newlyImported)
                             .append("\nSpam-mappe: ").append(result.junk)
                             .append("\nInnboks: ").append(result.inbox)
-                            .append("\nUten Envelope-To: ").append(result.skippedNoEnvelope)
+                            .append("\nUten Envelope-To (fortsatt indeksert): ").append(result.skippedNoEnvelope)
                             .append("\nMangler mappe: ").append(result.missingFolder)
-                            .append("\n\nGjennomgangskø: ").append(beforeReview)
+                            .append("\n\nMessage-index: ").append(beforeIndexed)
+                            .append(" → ").append(afterIndexed)
+                            .append("\nGjennomgangskø: ").append(beforeReview)
                             .append(" → ").append(afterReview)
                             .append("\nAliaser: ").append(beforeAliases)
                             .append(" → ").append(afterAliases);
-                    if (result.newlyImported == 0 && beforeReview == afterReview && beforeAliases == afterAliases)
-                        report.append("\n\nIngen ny synlig state ble opprettet. Dette betyr vanligvis at AliasBackfill allerede hadde importert de samme meldingene. Se Diagnostikklogg for detaljene.");
+                    if (result.newlyIndexed == 0 && beforeReview == afterReview && beforeIndexed == afterIndexed)
+                        report.append("\n\nIngen ny canonical message-state ble opprettet. Terminal viser nøyaktig hva skanneren fant og hvorfor køen eventuelt ikke endret seg.");
 
                     tvStatus.setText("Historisk skann ferdig · kø " + beforeReview + " → " + afterReview);
                     AlertDialog.Builder dialog = new AlertDialog.Builder(this)
@@ -2100,6 +2140,134 @@ public class ActivitySpamControl extends ActivityBase {
                 // Takes effect the next time Review renders.
             }
         });
+    }
+
+    private void renderTerminal() {
+        llPage.addView(sectionTitle("Terminal"), matchWrap());
+        llPage.addView(bodyText("Live operasjonslogg for Spamkontroll. Credentials og Authorization-header blir aldri logget. TRACE kan inneholde alias/endepunkter og er ment for lokal feilsøking."),
+                matchWrapWithMargin(0, 2, 0, 8));
+
+        LinearLayout levelRow = new LinearLayout(this);
+        levelRow.setOrientation(LinearLayout.HORIZONTAL);
+        String[] levels = {"ERROR", "WARN", "INFO", "DEBUG", "TRACE"};
+        Spinner level = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(this,
+                android.R.layout.simple_spinner_item, levels);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        level.setAdapter(adapter);
+        level.setSelection(Math.max(0, Math.min(4, terminalVerbosity)));
+        level.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                terminalVerbosity = position;
+                refreshTerminalOutput();
+            }
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) { }
+        });
+        levelRow.addView(valueText("Verbosity  ", 14f, true), wrapWrap());
+        levelRow.addView(level, new LinearLayout.LayoutParams(0,
+                ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        llPage.addView(levelRow, matchWrap());
+
+        EditText search = input("Søk i terminal", terminalSearch);
+        search.setSingleLine(true);
+        search.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) {
+                terminalSearch = s == null ? "" : s.toString();
+                refreshTerminalOutput();
+            }
+            @Override public void afterTextChanged(Editable s) { }
+        });
+        llPage.addView(search, matchWrapWithMargin(0, 5, 0, 5));
+
+        LinearLayout controls = new LinearLayout(this);
+        controls.setOrientation(LinearLayout.HORIZONTAL);
+        Button live = secondaryButton(terminalLive ? "⏸ Pause" : "▶ Live");
+        live.setOnClickListener(v -> {
+            terminalLive = !terminalLive;
+            terminalHandler.removeCallbacks(terminalRefresh);
+            if (terminalLive)
+                terminalHandler.post(terminalRefresh);
+            renderCurrent();
+        });
+        controls.addView(live, weightedButton());
+        Button refresh = secondaryButton("↻ Refresh");
+        refresh.setOnClickListener(v -> refreshTerminalOutput());
+        controls.addView(refresh, weightedButton());
+        Button share = secondaryButton("Eksporter");
+        share.setOnClickListener(v -> shareTerminalFiltered());
+        controls.addView(share, weightedButton());
+        llPage.addView(controls, matchWrap());
+
+        Button clear = secondaryButton("Tøm terminal");
+        clear.setOnClickListener(v -> new AlertDialog.Builder(this)
+                .setTitle("Tøm Terminal?")
+                .setMessage("Dette sletter den lokale diagnostikkloggen. Mail og Spamkontroll-data påvirkes ikke.")
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton("Tøm", (d, w) -> {
+                    SpamControlLog.clear(getApplicationContext());
+                    refreshTerminalOutput();
+                }).show());
+        llPage.addView(clear, matchWrapWithMargin(0, 5, 0, 7));
+
+        terminalOutput = bodyText("");
+        terminalOutput.setTypeface(Typeface.MONOSPACE);
+        terminalOutput.setTextIsSelectable(true);
+        terminalOutput.setTextSize(12f);
+        terminalOutput.setPadding(dp(8), dp(8), dp(8), dp(16));
+        llPage.addView(terminalOutput, matchWrap());
+        refreshTerminalOutput();
+    }
+
+    private void refreshTerminalOutput() {
+        if (terminalOutput == null || section != Section.TERMINAL)
+            return;
+        String filtered = filteredTerminalLog();
+        terminalOutput.setText(TextUtils.isEmpty(filtered)
+                ? "$ _\n(ingen logglinjer matcher filteret)" : "$ spam-control --live\n" + filtered);
+    }
+
+    private String filteredTerminalLog() {
+        String raw = SpamControlLog.read(getApplicationContext());
+        if (TextUtils.isEmpty(raw))
+            return "";
+        String query = terminalSearch == null ? "" : terminalSearch.trim().toLowerCase(Locale.ROOT);
+        StringBuilder out = new StringBuilder();
+        for (String line : raw.split("\n")) {
+            if (line == null || line.isEmpty())
+                continue;
+            int level = terminalLineLevel(line);
+            if (level > terminalVerbosity)
+                continue;
+            if (!query.isEmpty() && !line.toLowerCase(Locale.ROOT).contains(query))
+                continue;
+            if (out.length() > 0)
+                out.append('\n');
+            out.append(line);
+        }
+        return out.toString();
+    }
+
+    private int terminalLineLevel(String line) {
+        if (line.contains("[ERROR]")) return 0;
+        if (line.contains("[WARN]")) return 1;
+        if (line.contains("[INFO]")) return 2;
+        if (line.contains("[DEBUG]")) return 3;
+        if (line.contains("[TRACE]")) return 4;
+        return 2;
+    }
+
+    private void shareTerminalFiltered() {
+        String text = filteredTerminalLog();
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("text/plain");
+        share.putExtra(Intent.EXTRA_SUBJECT, "Spamkontroll Terminal");
+        share.putExtra(Intent.EXTRA_TEXT, "Verbosity=" + terminalVerbosity +
+                " search=" + empty(terminalSearch, "(ingen)") + "\n\n" +
+                (TextUtils.isEmpty(text) ? "Ingen logglinjer matcher filteret." : text));
+        startActivity(Intent.createChooser(share, "Eksporter Spamkontroll Terminal"));
     }
 
     private void showDiagnosticsLog() {
