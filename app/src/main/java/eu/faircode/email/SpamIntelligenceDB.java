@@ -25,11 +25,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 4,
+        version = 5,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
-                EntitySpamMeta.class
+                EntitySpamMeta.class,
+                EntitySpamIntent.class
         },
         exportSchema = true
 )
@@ -79,6 +80,23 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_4_5 = new Migration(4, 5) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS spam_intent (" +
+                    "operation_id INTEGER NOT NULL," +
+                    "message_id INTEGER NOT NULL," +
+                    "source_type TEXT," +
+                    "target_type TEXT," +
+                    "captured_at INTEGER NOT NULL," +
+                    "attempts INTEGER NOT NULL," +
+                    "last_attempt_at INTEGER," +
+                    "PRIMARY KEY(operation_id))");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_intent_captured_at ON spam_intent(captured_at)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_intent_message_id ON spam_intent(message_id)");
+        }
+    };
+
     public abstract DaoAlias alias();
 
     public static SpamIntelligenceDB getInstance(Context context) {
@@ -93,7 +111,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 context.getApplicationContext(),
                                 SpamIntelligenceDB.class,
                                 DB_NAME)
-                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                        .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                         .build();
                 instance = current;
             }
