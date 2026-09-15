@@ -40,6 +40,11 @@ public interface DaoAlias {
             " ORDER BY spam_hits DESC, last_spam DESC, last_seen DESC")
     LiveData<List<EntityAlias>> liveSpamAffected(String accountUuid);
 
+    @Query("SELECT * FROM alias" +
+            " WHERE smtp_reject_state <> " + EntityAlias.SMTP_REJECT_NONE +
+            " ORDER BY smtp_reject_requested_at DESC, last_seen DESC")
+    LiveData<List<EntityAlias>> liveSmtpManagedAliases();
+
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     long insertAlias(EntityAlias alias);
 
@@ -99,6 +104,51 @@ public interface DaoAlias {
     @Query("UPDATE alias SET replaced_by = :replacement, state = " + EntityAlias.STATE_REPLACED +
             " WHERE account_uuid = :accountUuid AND address = :address")
     int markReplaced(String accountUuid, String address, String replacement);
+
+    @Query("UPDATE alias SET state = " + EntityAlias.STATE_COMPROMISED +
+            " WHERE account_uuid = :accountUuid AND address = :address" +
+            " AND state = " + EntityAlias.STATE_ACTIVE)
+    int markCompromised(String accountUuid, String address);
+
+    @Query("UPDATE alias SET" +
+            " smtp_reject_state = " + EntityAlias.SMTP_REJECT_PENDING + "," +
+            " smtp_reject_provider = :provider," +
+            " smtp_reject_reason = :reason," +
+            " smtp_reject_requested_at = :requestedAt," +
+            " smtp_reject_verified_at = NULL," +
+            " smtp_reject_error = NULL" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int markSmtpRejectPending(String accountUuid, String address,
+                              String provider, String reason, long requestedAt);
+
+    @Query("UPDATE alias SET" +
+            " smtp_reject_state = " + EntityAlias.SMTP_REJECT_VERIFIED + "," +
+            " smtp_reject_verified_at = :verifiedAt," +
+            " smtp_reject_error = NULL" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int markSmtpRejectVerified(String accountUuid, String address, long verifiedAt);
+
+    @Query("UPDATE alias SET" +
+            " smtp_reject_state = " + EntityAlias.SMTP_REJECT_FAILED + "," +
+            " smtp_reject_error = :error" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int markSmtpRejectFailed(String accountUuid, String address, String error);
+
+    @Query("UPDATE alias SET" +
+            " smtp_reject_state = " + EntityAlias.SMTP_RESTORE_PENDING + "," +
+            " smtp_reject_error = NULL" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int markSmtpRestorePending(String accountUuid, String address);
+
+    @Query("UPDATE alias SET" +
+            " smtp_reject_state = " + EntityAlias.SMTP_REJECT_NONE + "," +
+            " smtp_reject_provider = NULL," +
+            " smtp_reject_reason = NULL," +
+            " smtp_reject_requested_at = NULL," +
+            " smtp_reject_verified_at = NULL," +
+            " smtp_reject_error = NULL" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int clearSmtpReject(String accountUuid, String address);
 
     @Query("DELETE FROM alias WHERE account_uuid = :accountUuid")
     int deleteAliases(String accountUuid);
