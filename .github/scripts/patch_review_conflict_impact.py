@@ -1,5 +1,6 @@
 from pathlib import Path
 
+# Trigger revision 1: workflow exists before this script update.
 ACT = Path('app/src/main/java/eu/faircode/email/ActivitySpamControl.java')
 text = ACT.read_text()
 
