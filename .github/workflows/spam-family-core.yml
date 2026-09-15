@@ -1,3 +1,4 @@
+# Gate trigger: hardened exact-family semantics
 name: Spam Family Core
 
 on:
