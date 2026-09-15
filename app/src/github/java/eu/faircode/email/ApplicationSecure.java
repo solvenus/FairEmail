@@ -37,6 +37,17 @@ public class ApplicationSecure extends ApplicationEx implements ProviderInstalle
     @Override
     public void onCreate() {
         super.onCreate();
+
+        // The custom intelligence layer must be alive before a user can act on
+        // already-synced mail. Both calls are background/idempotent and must not
+        // be able to block normal FairEmail startup.
+        try {
+            SpamIntentObserver.start(this);
+            AliasBackfill.schedule(this);
+        } catch (Throwable ex) {
+            Log.e(ex);
+        }
+
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
         boolean ssl_update = prefs.getBoolean("ssl_update", Helper.isPlayStoreInstall());
         if (ssl_update) {
