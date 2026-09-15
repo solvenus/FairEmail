@@ -258,8 +258,8 @@ public final class CpanelAliasActuator implements AliasServerActuator {
 
         HttpURLConnection connection = null;
         String endpoint = builder.build().toString();
-        SpamControlLog.i(context, "CPANEL",
-                "REQUEST " + module + "/" + function + " endpoint=" + endpoint);
+        SpamControlLog.d(context, "CPANEL",
+                "> GET " + module + "/" + function + " endpoint=" + endpoint);
         try {
             URL url = new URL(endpoint);
             connection = (HttpURLConnection) url.openConnection();
@@ -292,11 +292,12 @@ public final class CpanelAliasActuator implements AliasServerActuator {
                         " from " + connection.getURL(), ex);
             }
 
-            SpamControlLog.i(context, "CPANEL",
-                    "RESPONSE HTTP " + code + " final=" + connection.getURL() +
+            SpamControlLog.d(context, "CPANEL",
+                    "< HTTP " + code + " final=" + connection.getURL() +
                             " contentType=" + connection.getContentType() +
-                            " topLevel=" + topLevelKeys(root) +
-                            " body=" + SpamControlLog.sanitize(body));
+                            " topLevel=" + topLevelKeys(root));
+            SpamControlLog.t(context, "CPANEL",
+                    "< BODY " + SpamControlLog.sanitize(body));
 
             if (code < 200 || code >= 300)
                 throw new IOException("cPanel HTTP " + code + ": " + apiError(root));
