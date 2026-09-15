@@ -41,7 +41,8 @@ jobs:
             app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java \
             app/src/main/java/eu/faircode/email/AliasBurnPolicy.java \
             tools/spam-family-lab/SpamFamilyLab.java \
-            tools/spam-family-lab/AliasBurnPolicyLab.java
+            tools/spam-family-lab/AliasBurnPolicyLab.java \
+            tools/spam-family-lab/SpamFamilySerializationLab.java
       - name: Run spam family lab
         run: |
           set -euo pipefail
@@ -50,3 +51,7 @@ jobs:
         run: |
           set -euo pipefail
           java -cp build/spam-family-core eu.faircode.email.AliasBurnPolicyLab
+      - name: Run fingerprint serialization lab
+        run: |
+          set -euo pipefail
+          java -cp build/spam-family-core eu.faircode.email.SpamFamilySerializationLab
