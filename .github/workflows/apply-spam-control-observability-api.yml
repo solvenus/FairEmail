@@ -1,0 +1,119 @@
+name: Apply Spam Control observability via API
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/workflows/apply-spam-control-observability-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: feature/spam-control-p0
+    steps:
+      - name: Apply stored fail-closed patch through Contents API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess, tempfile, urllib.parse, urllib.request
+
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          token = os.environ['GH_TOKEN']
+          source_paths = [
+              'app/src/main/java/eu/faircode/email/ActivitySpamControl.java',
+              'app/src/main/java/eu/faircode/email/CpanelAliasActuator.java',
+              'app/src/main/java/eu/faircode/email/SpamHistoricalScanner.java',
+          ]
+          script_path = '.github/scripts/patch_spam_control_observability.py'
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'spam-control-observability-patcher',
+          }
+
+          def api_get(path):
+              url = f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}'
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  return json.loads(response.read().decode())
+
+          def api_put(path, sha, content, message):
+              url = f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(path)}'
+              payload = json.dumps({
+                  'message': message,
+                  'content': base64.b64encode(content.encode()).decode(),
+                  'sha': sha,
+                  'branch': branch,
+              }).encode()
+              req = urllib.request.Request(url, data=payload, method='PUT', headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  return json.loads(response.read().decode())
+
+          sources = {path: api_get(path) for path in source_paths}
+          script = api_get(script_path)
+          decoded = {path: base64.b64decode(obj['content']).decode() for path, obj in sources.items()}
+
+          activity = decoded[source_paths[0]]
+          cpanel = decoded[source_paths[1]]
+          scanner = decoded[source_paths[2]]
+          if ('private void showDiagnosticsLog()' in activity and
+                  'unexpectedResponseShape(JSONObject root' in cpanel and
+                  'SpamControlLog.i(app, "SCAN"' in scanner):
+              print('Patch already present; nothing to do')
+              raise SystemExit(0)
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = pathlib.Path(tmp)
+              for path, text in decoded.items():
+                  target = root / path
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  target.write_text(text)
+              patcher = root / script_path
+              patcher.parent.mkdir(parents=True, exist_ok=True)
+              patcher.write_text(base64.b64decode(script['content']).decode())
+              subprocess.run(['python3', str(patcher)], cwd=root, check=True)
+              updated = {path: (root / path).read_text() for path in source_paths}
+
+          required = {
+              source_paths[0]: [
+                  'private void showDiagnosticsLog()',
+                  'Historisk skann ferdig',
+                  'Gjennomgangskø:',
+                  'new CpanelAliasActuator(getApplicationContext(), config)',
+                  'SpamControlLog.i(getApplicationContext(), "SMTP-BURN"',
+              ],
+              source_paths[1]: [
+                  'private final Context context;',
+                  'unexpectedResponseShape(JSONObject root',
+                  'legacy API2 wrapper',
+                  'topLevelKeys(root)',
+                  'SpamControlLog.i(context, "CPANEL"',
+              ],
+              source_paths[2]: [
+                  'SpamControlLog.i(app, "SCAN"',
+                  'existing=" + Math.max(0, observed - newlyImported)',
+                  'SpamControlLog.e(app, "SCAN"',
+              ],
+          }
+          for path, needles in required.items():
+              for needle in needles:
+                  if needle not in updated[path]:
+                      raise SystemExit(f'{path}: missing required patch marker: {needle}')
+
+          # Optimistic concurrency: every PUT uses the exact blob SHA read above.
+          # If another writer touched one of these files, GitHub rejects instead of overwriting it.
+          for path in source_paths:
+              result = api_put(path, sources[path]['sha'], updated[path],
+                               'Add Spam Control diagnostics and truthful scan/cPanel errors')
+              print('updated', path, result['commit']['sha'])
+          PY
