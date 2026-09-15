@@ -1,4 +1,4 @@
-# Gate trigger: repaired Spam Control prototype minimum
+# Gate trigger: hardened Spam Control runtime semantics
 name: Spam Intelligence Android Compile
 
 on:
