@@ -1,5 +1,6 @@
 name: Diagnose Spam message consumer patch
 
+# trigger: v1
 on:
   push:
     branches: [feature/spam-control-p0]
