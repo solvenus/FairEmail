@@ -316,7 +316,7 @@ public final class SpamIntelligence {
                         else if (compromise == AliasCompromisePolicy.Decision.REVIEW)
                             Log.i("SpamControl alias compromise needs review alias=" + after.address +
                                     " message=" + message.id);
-                        else if (compromise == AliasCompromisePolicy.Decision.KEEP_ACTIVE) {
+                        else if (compromise == AliasCompromisePolicy.Decision.KEEP) {
                             EntityAlias currentAlias = dao.getAlias(account.uuid, after.address);
                             if (currentAlias != null)
                                 AliasCompromiseReviewStore.markReviewedHealthy(context, currentAlias);
