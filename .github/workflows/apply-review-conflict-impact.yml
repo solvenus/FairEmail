@@ -1,0 +1,39 @@
+name: Apply review conflict and impact UI
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_review_conflict_impact.py'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: feature/spam-control-p0
+          fetch-depth: 0
+      - name: Apply fail-closed review patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_review_conflict_impact.py
+          git diff --check
+      - name: Commit and rebase-safe push
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- app/src/main/java/eu/faircode/email/ActivitySpamControl.java; then
+            echo 'No source changes needed'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git commit -m 'Show review conflicts and exact identity impact'
+          git pull --rebase origin feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
