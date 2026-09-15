@@ -175,8 +175,18 @@ public interface DaoAlias {
 
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
+            " AND label = " + EntityAliasDelivery.LABEL_UNKNOWN +
+            " AND message_id > :afterMessageId" +
+            " ORDER BY message_id" +
+            " LIMIT :limit")
+    List<EntityAliasDelivery> getUnknownDeliveriesAfter(
+            String accountUuid, long afterMessageId, int limit);
+
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
             " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR folder_type = '" + EntityFolder.JUNK + "'" +
             "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))" +
             " ORDER BY" +
             " CASE WHEN label = " + EntityAliasDelivery.LABEL_UNKNOWN + " THEN 0 ELSE 1 END," +
@@ -189,6 +199,7 @@ public interface DaoAlias {
             " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntityAliasDelivery.LABEL_UNKNOWN + ")" +
             " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR folder_type = '" + EntityFolder.JUNK + "'" +
             "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))")
     int countReviewQueue(String accountUuid, boolean includeReviewed);
 

@@ -62,6 +62,8 @@ final class SpamLearningSnapshot {
                 root.put("families", familiesToJson(dao.getFamilies(account)));
                 root.put("exemplars", exemplarsToJson(dao.getExemplars(account)));
                 root.put("exclusions", exclusionsToJson(dao.getExclusions(account)));
+                root.put("meta", metaToJson(dao.getMetaByPrefix(
+                        SpamFamilyIdentity.accountMetaPrefix(account))));
 
                 if (messageId > 0) {
                     EntityAliasDelivery delivery = dao.getDelivery(account, messageId);
@@ -72,6 +74,54 @@ final class SpamLearningSnapshot {
                             root.put("alias", aliasToJson(alias));
                     }
                 }
+                return encode(root);
+            }
+        });
+    }
+
+    /**
+     * Capture every learned row for one account. Used when one human action can
+     * legitimately update many exact-identity deliveries/aliases at once.
+     */
+    static String captureAccountAllLearning(Context context,
+                                            String accountUuid) throws Exception {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
+            throw new IllegalArgumentException("accountUuid");
+
+        Context app = context.getApplicationContext();
+        SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(app);
+        final String account = accountUuid.trim();
+        return db.runInTransaction(new Callable<String>() {
+            @Override
+            public String call() throws Exception {
+                DaoSpamSnapshot dao = db.snapshot();
+                JSONObject root = new JSONObject();
+                root.put("version", VERSION);
+                root.put("scope", SCOPE_ACCOUNT);
+                root.put("account_uuid", account);
+                root.put("message_id", 0L);
+                root.put("full_account_learning", true);
+                root.put("families", familiesToJson(dao.getFamilies(account)));
+                root.put("exemplars", exemplarsToJson(dao.getExemplars(account)));
+                root.put("exclusions", exclusionsToJson(dao.getExclusions(account)));
+                root.put("meta", metaToJson(dao.getMetaByPrefix(
+                        SpamFamilyIdentity.accountMetaPrefix(account))));
+
+                JSONArray deliveries = new JSONArray();
+                List<EntityAliasDelivery> deliveryRows = dao.getDeliveries(account);
+                if (deliveryRows != null)
+                    for (EntityAliasDelivery row : deliveryRows)
+                        if (row != null)
+                            deliveries.put(deliveryToJson(row));
+                root.put("deliveries", deliveries);
+
+                JSONArray aliases = new JSONArray();
+                List<EntityAlias> aliasRows = dao.getAliases(account);
+                if (aliasRows != null)
+                    for (EntityAlias row : aliasRows)
+                        if (row != null)
+                            aliases.put(aliasToJson(row));
+                root.put("aliases", aliases);
                 return encode(root);
             }
         });
@@ -93,6 +143,8 @@ final class SpamLearningSnapshot {
                 root.put("families", familiesToJson(dao.getAllFamilies()));
                 root.put("exemplars", exemplarsToJson(dao.getAllExemplars()));
                 root.put("exclusions", exclusionsToJson(dao.getAllExclusions()));
+                root.put("meta", metaToJson(dao.getMetaByPrefix(
+                        SpamFamilyIdentity.globalMetaPrefix())));
 
                 JSONArray deliveries = new JSONArray();
                 List<EntityAliasDelivery> deliveryRows = dao.getAllDeliveries();
@@ -141,41 +193,70 @@ final class SpamLearningSnapshot {
                     dao.deleteExemplars(account);
                     dao.deleteFamilies(account);
                     dao.clearPredictions(account);
+                    if (root.has("meta"))
+                        dao.deleteMetaByPrefix(SpamFamilyIdentity.accountMetaPrefix(account));
 
                     List<EntitySpamFamily> families = familiesFromJson(root.getJSONArray("families"));
                     List<EntitySpamFamilyExemplar> exemplars = exemplarsFromJson(root.getJSONArray("exemplars"));
                     List<EntitySpamFamilyExclusion> exclusions = exclusionsFromJson(root.getJSONArray("exclusions"));
+                    List<EntitySpamMeta> meta = root.has("meta")
+                            ? metaFromJson(root.getJSONArray("meta"))
+                            : new ArrayList<EntitySpamMeta>();
                     if (!families.isEmpty())
                         dao.putFamilies(families);
                     if (!exemplars.isEmpty())
                         dao.putExemplars(exemplars);
                     if (!exclusions.isEmpty())
                         dao.putExclusions(exclusions);
+                    if (!meta.isEmpty())
+                        dao.putMeta(meta);
 
-                    JSONObject delivery = root.optJSONObject("delivery");
-                    if (delivery != null)
-                        restoreDelivery(dao, delivery);
-                    JSONObject alias = root.optJSONObject("alias");
-                    if (alias != null)
-                        restoreAlias(dao, alias);
+                    if (root.optBoolean("full_account_learning", false)) {
+                        dao.resetAccountDeliveryLearning(account);
+                        dao.resetAccountAliasLearning(account);
+
+                        JSONArray deliveries = root.optJSONArray("deliveries");
+                        if (deliveries != null)
+                            for (int i = 0; i < deliveries.length(); i++)
+                                restoreDelivery(dao, deliveries.getJSONObject(i));
+
+                        JSONArray aliases = root.optJSONArray("aliases");
+                        if (aliases != null)
+                            for (int i = 0; i < aliases.length(); i++)
+                                restoreAlias(dao, aliases.getJSONObject(i));
+                    } else {
+                        JSONObject delivery = root.optJSONObject("delivery");
+                        if (delivery != null)
+                            restoreDelivery(dao, delivery);
+                        JSONObject alias = root.optJSONObject("alias");
+                        if (alias != null)
+                            restoreAlias(dao, alias);
+                    }
                 } else if (SCOPE_ALL.equals(scope)) {
                     dao.deleteAllSpamIntents();
                     dao.deleteAllRescoreTasks();
                     dao.deleteAllExclusions();
                     dao.deleteAllExemplars();
                     dao.deleteAllFamilies();
+                    if (root.has("meta"))
+                        dao.deleteMetaByPrefix(SpamFamilyIdentity.globalMetaPrefix());
                     dao.resetAllDeliveryLearning();
                     dao.resetAllAliasLearning();
 
                     List<EntitySpamFamily> families = familiesFromJson(root.getJSONArray("families"));
                     List<EntitySpamFamilyExemplar> exemplars = exemplarsFromJson(root.getJSONArray("exemplars"));
                     List<EntitySpamFamilyExclusion> exclusions = exclusionsFromJson(root.getJSONArray("exclusions"));
+                    List<EntitySpamMeta> meta = root.has("meta")
+                            ? metaFromJson(root.getJSONArray("meta"))
+                            : new ArrayList<EntitySpamMeta>();
                     if (!families.isEmpty())
                         dao.putFamilies(families);
                     if (!exemplars.isEmpty())
                         dao.putExemplars(exemplars);
                     if (!exclusions.isEmpty())
                         dao.putExclusions(exclusions);
+                    if (!meta.isEmpty())
+                        dao.putMeta(meta);
 
                     JSONArray deliveries = root.getJSONArray("deliveries");
                     for (int i = 0; i < deliveries.length(); i++) {
@@ -221,11 +302,41 @@ final class SpamLearningSnapshot {
                 dao.deleteAllExclusions();
                 dao.deleteAllExemplars();
                 dao.deleteAllFamilies();
+                dao.deleteMetaByPrefix(SpamFamilyIdentity.globalMetaPrefix());
                 dao.resetAllDeliveryLearning();
                 dao.resetAllAliasLearning();
                 return true;
             }
         });
+    }
+
+    private static JSONArray metaToJson(List<EntitySpamMeta> rows) throws Exception {
+        JSONArray result = new JSONArray();
+        if (rows == null)
+            return result;
+        for (EntitySpamMeta row : rows) {
+            if (row == null)
+                continue;
+            JSONObject o = new JSONObject();
+            o.put("key", row.key);
+            put(o, "long_value", row.long_value);
+            put(o, "text_value", row.text_value);
+            result.put(o);
+        }
+        return result;
+    }
+
+    private static List<EntitySpamMeta> metaFromJson(JSONArray rows) throws Exception {
+        List<EntitySpamMeta> result = new ArrayList<>();
+        for (int i = 0; i < rows.length(); i++) {
+            JSONObject o = rows.getJSONObject(i);
+            EntitySpamMeta row = new EntitySpamMeta();
+            row.key = o.getString("key");
+            row.long_value = optLong(o, "long_value");
+            row.text_value = optString(o, "text_value");
+            result.add(row);
+        }
+        return result;
     }
 
     private static JSONArray familiesToJson(List<EntitySpamFamily> rows) throws Exception {

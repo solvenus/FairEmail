@@ -64,6 +64,41 @@ public final class SpamUndoManager {
         }
     }
 
+    public static SpamFamilyLabRepository.BulkActionResult runBulkMessageAction(
+            Context context,
+            String accountUuid,
+            long contextFamilyId,
+            long messageId,
+            String action,
+            String description,
+            Callable<SpamFamilyLabRepository.BulkActionResult> delegate) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty() ||
+                messageId <= 0 || delegate == null)
+            return SpamFamilyLabRepository.BulkActionResult.rejected();
+
+        Context app = context.getApplicationContext();
+        SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(app);
+        Long historyId = null;
+        try {
+            String before = SpamLearningSnapshot.captureAccountAllLearning(
+                    app, accountUuid.trim());
+            historyId = recordBefore(db, accountUuid.trim(), messageId,
+                    contextFamilyId, action, description, before);
+
+            SpamFamilyLabRepository.BulkActionResult result = delegate.call();
+            if (result == null || result.result != SpamFamilyLabRepository.ActionResult.APPLIED)
+                db.actions().delete(historyId);
+            return result == null
+                    ? SpamFamilyLabRepository.BulkActionResult.rejected()
+                    : result;
+        } catch (Throwable ex) {
+            Log.e(ex);
+            if (historyId != null)
+                db.actions().delete(historyId);
+            return SpamFamilyLabRepository.BulkActionResult.rejected();
+        }
+    }
+
     public static boolean renameFamily(Context context,
                                        String accountUuid,
                                        long familyId,

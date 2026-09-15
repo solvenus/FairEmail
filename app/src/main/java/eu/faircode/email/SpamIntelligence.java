@@ -308,8 +308,15 @@ public final class SpamIntelligence {
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
                 if (label == EntityAliasDelivery.LABEL_SPAM) {
-                    if (SpamControlPolicy.markAliasCompromised(context))
-                        dao.markCompromised(account.uuid, after.address);
+                    if (SpamControlPolicy.markAliasCompromised(context)) {
+                        AliasCompromisePolicy.Decision compromise =
+                                aliasCompromiseDecision(context, account, message);
+                        if (compromise == AliasCompromisePolicy.Decision.COMPROMISE)
+                            dao.markCompromised(account.uuid, after.address);
+                        else if (compromise == AliasCompromisePolicy.Decision.REVIEW)
+                            Log.i("SpamControl alias compromise needs review alias=" + after.address +
+                                    " message=" + message.id);
+                    }
                 } else {
                     EntityAlias alias = dao.getAlias(account.uuid, after.address);
                     if (alias != null && alias.state == EntityAlias.STATE_COMPROMISED &&
@@ -398,6 +405,34 @@ public final class SpamIntelligence {
         } catch (Throwable ex) {
             Log.e(ex);
         }
+    }
+
+    private static AliasCompromisePolicy.Decision aliasCompromiseDecision(
+            Context context, EntityAccount account, EntityMessage message) {
+        AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(
+                context, account, message);
+        AliasCompromisePolicy.Input input = new AliasCompromisePolicy.Input();
+        input.explicitSpam = true;
+        input.trafficSuspicious = traffic.assessment.verdict ==
+                AliasTrafficScorer.Verdict.SUSPICIOUS;
+        input.senderKnown = traffic.senderDomain != null;
+        input.expectedContextKnown = traffic.serviceDomain != null ||
+                (traffic.trustedDomains != null && !traffic.trustedDomains.isEmpty());
+        input.expectedSenderMatch = traffic.senderDomain != null &&
+                ((traffic.serviceDomain != null &&
+                        traffic.senderDomain.equalsIgnoreCase(traffic.serviceDomain)) ||
+                        containsIgnoreCase(traffic.trustedDomains, traffic.senderDomain));
+        input.aliasHam = traffic.aliasHam;
+        return AliasCompromisePolicy.decide(input);
+    }
+
+    private static boolean containsIgnoreCase(java.util.List<String> values, String needle) {
+        if (values == null || needle == null)
+            return false;
+        for (String value : values)
+            if (needle.equalsIgnoreCase(value))
+                return true;
+        return false;
     }
 
     private static String emailDomain(String address) {

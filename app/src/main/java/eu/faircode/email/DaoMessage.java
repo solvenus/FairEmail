@@ -322,6 +322,17 @@ public interface DaoMessage {
             " WHERE id = :id")
     EntityMessage getMessage(long id);
 
+    @Query("SELECT message.* FROM message" +
+            " JOIN folder ON folder.id = message.folder" +
+            " WHERE message.account = :account" +
+            " AND folder.type IN (:folderTypes)" +
+            " AND message.id > :afterMessageId" +
+            " AND NOT message.ui_hide" +
+            " ORDER BY message.id" +
+            " LIMIT :limit")
+    List<EntityMessage> getSpamControlHistoricalPage(
+            long account, List<String> folderTypes, long afterMessageId, int limit);
+
     @Query("SELECT *" +
             " FROM message" +
             " WHERE folder = :folder" +

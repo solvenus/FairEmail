@@ -37,6 +37,26 @@ public final class SpamFamilyLabRepository {
         REJECTED
     }
 
+    public static final class BulkActionResult {
+        public final ActionResult result;
+        public final int messages;
+        public final int aliases;
+
+        BulkActionResult(ActionResult result, int messages, int aliases) {
+            this.result = result == null ? ActionResult.REJECTED : result;
+            this.messages = Math.max(0, messages);
+            this.aliases = Math.max(0, aliases);
+        }
+
+        public static BulkActionResult rejected() {
+            return new BulkActionResult(ActionResult.REJECTED, 0, 0);
+        }
+
+        static BulkActionResult error(ActionResult result) {
+            return new BulkActionResult(result, 0, 0);
+        }
+    }
+
     private SpamFamilyLabRepository() {
     }
 
@@ -79,6 +99,7 @@ public final class SpamFamilyLabRepository {
                 continue;
 
             boolean suspiciousAlias = "SUSPICIOUS".equals(delivery.traffic_verdict);
+            boolean historicalJunk = EntityFolder.JUNK.equals(delivery.folder_type);
             boolean exactPrediction = false;
             if (delivery.predicted_family_id != null) {
                 if (SpamControlPolicy.exactFamilyDetection(context)) {
@@ -104,7 +125,7 @@ public final class SpamFamilyLabRepository {
                 }
             }
 
-            if (!suspiciousAlias && !exactPrediction)
+            if (!suspiciousAlias && !historicalJunk && !exactPrediction)
                 continue;
 
             EntityAlias alias = null;
@@ -172,6 +193,34 @@ public final class SpamFamilyLabRepository {
                 .alias().getDelivery(resolved.account.uuid, messageId);
         return after != null && after.label == EntityAliasDelivery.LABEL_SPAM
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
+    }
+
+    /**
+     * One human Spam decision means the exact sender-name + subject identity is
+     * spam. Apply that truth to every retained UNKNOWN twin while preserving
+     * explicit HAM exceptions.
+     */
+    public static BulkActionResult markSpamBulk(Context context,
+                                                String accountUuid,
+                                                long messageId) {
+        Resolved resolved = resolve(context, accountUuid, messageId);
+        if (resolved.result != null)
+            return BulkActionResult.error(resolved.result);
+
+        SpamIntelligence.learnSpam(context, resolved.account, resolved.message, null);
+        DaoAlias aliasDao = SpamIntelligenceDB.getInstance(context).alias();
+        EntityAliasDelivery after = aliasDao.getDelivery(resolved.account.uuid, messageId);
+        if (after == null || after.label != EntityAliasDelivery.LABEL_SPAM)
+            return BulkActionResult.rejected();
+
+        if (after.family_id == null)
+            return new BulkActionResult(ActionResult.APPLIED, 1, after.address == null ? 0 : 1);
+
+        SpamExactBulkPropagator.Result propagated = SpamExactBulkPropagator.propagate(
+                context, resolved.account, resolved.message, after.family_id, after.address);
+        int messages = Math.max(1, propagated.messages);
+        int aliases = Math.max(after.address == null ? 0 : 1, propagated.aliases);
+        return new BulkActionResult(ActionResult.APPLIED, messages, aliases);
     }
 
     /** Explicitly confirm this locally available message as spam in this exact group. */
