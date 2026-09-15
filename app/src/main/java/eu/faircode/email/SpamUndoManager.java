@@ -18,8 +18,6 @@ import java.util.concurrent.Callable;
 /** Persistent semantic undo stack for explicit human choices in Spam Control. */
 public final class SpamUndoManager {
     public static final String ACTION_SPAM = "SPAM";
-    public static final String ACTION_SAME_SPAM = "SAME_SPAM";
-    public static final String ACTION_OTHER_SPAM = "OTHER_SPAM";
     public static final String ACTION_NOT_SPAM = "NOT_SPAM";
     public static final String ACTION_RENAME = "RENAME";
     public static final String ACTION_ALIAS_KEEP_ACTIVE = "ALIAS_KEEP_ACTIVE";

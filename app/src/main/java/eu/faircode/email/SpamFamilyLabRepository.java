@@ -235,49 +235,6 @@ public final class SpamFamilyLabRepository {
         return new BulkActionResult(ActionResult.APPLIED, messages, aliases);
     }
 
-    /** Explicitly confirm this locally available message as spam in this exact group. */
-    public static ActionResult confirmSpam(Context context,
-                                           String accountUuid,
-                                           long familyId,
-                                           long messageId) {
-        Resolved resolved = resolve(context, accountUuid, messageId);
-        if (resolved.result != null)
-            return resolved.result;
-
-        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
-        EntitySpamFamily family = intelligence.family().getFamily(familyId);
-        if (family == null || family.id == null ||
-                !resolved.account.uuid.equals(family.account_uuid))
-            return ActionResult.FAMILY_MISSING;
-
-        EntityAliasDelivery before = intelligence.alias()
-                .getDelivery(resolved.account.uuid, messageId);
-        if (before != null &&
-                before.label == EntityAliasDelivery.LABEL_SPAM &&
-                before.family_id != null && before.family_id != familyId) {
-            SpamFamilyReassigner.Result reassigned = SpamFamilyReassigner.reassign(
-                    context, resolved.account, resolved.message, familyId);
-            if (!reassigned.applied())
-                return ActionResult.REJECTED;
-        } else
-            SpamIntelligence.learnSpam(context, resolved.account, resolved.message, familyId);
-
-        EntityAliasDelivery after = intelligence.alias()
-                .getDelivery(resolved.account.uuid, messageId);
-        return after != null &&
-                after.label == EntityAliasDelivery.LABEL_SPAM &&
-                after.family_id != null && after.family_id == familyId
-                ? ActionResult.APPLIED : ActionResult.REJECTED;
-    }
-
-    public static ActionResult markOtherSpam(Context context,
-                                             String accountUuid,
-                                             long currentFamilyId,
-                                             long messageId) {
-        return SpamFamilyHumanActions.markOtherSpam(
-                context, accountUuid, currentFamilyId, messageId);
-    }
-
     public static ActionResult markLegitimate(Context context,
                                               String accountUuid,
                                               long messageId) {
@@ -290,27 +247,6 @@ public final class SpamFamilyLabRepository {
                 .message().get(resolved.account.uuid, messageId);
         return after != null && after.label == EntitySpamMessage.LABEL_HAM
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
-    }
-
-    public static ActionResult excludeFromFamily(Context context,
-                                                 String accountUuid,
-                                                 long familyId,
-                                                 long messageId) {
-        Resolved resolved = resolve(context, accountUuid, messageId);
-        if (resolved.result != null)
-            return resolved.result;
-
-        EntitySpamFamily family = SpamIntelligenceDB.getInstance(context)
-                .family().getFamily(familyId);
-        if (family == null || family.id == null ||
-                !resolved.account.uuid.equals(family.account_uuid))
-            return ActionResult.FAMILY_MISSING;
-
-        boolean accepted = SpamIntelligence.excludeFromFamily(
-                context, resolved.account, resolved.message, familyId, "spam_control");
-        int stored = SpamIntelligenceDB.getInstance(context).family()
-                .countExclusion(resolved.account.uuid, messageId, familyId);
-        return accepted && stored > 0 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
     public static void renameFamily(Context context, long familyId, String name) {

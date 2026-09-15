@@ -105,9 +105,6 @@ public final class SpamFamilyStore {
         if (family == null || family.id == null || !family.active ||
                 !accountUuid.equals(family.account_uuid))
             return new Match(null, SpamFamilyEngine.Score.ZERO, false);
-        if (messageId > 0 && dao.countExclusion(accountUuid, messageId, familyId) > 0)
-            return new Match(null, SpamFamilyEngine.Score.ZERO, false);
-
         return new Match(familyId, SpamFamilyEngine.Score.exact(), true);
     }
 

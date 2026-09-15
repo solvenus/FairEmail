@@ -173,56 +173,6 @@ public final class SpamIntelligence {
         setLabel(context, account, message, EntityAliasDelivery.LABEL_UNKNOWN, null);
     }
 
-    /**
-     * Explicitly state that one message does not belong to one family without
-     * claiming the message is legitimate.
-     */
-    public static boolean excludeFromFamily(Context context,
-                                            EntityAccount account,
-                                            EntityMessage message,
-                                            long familyId,
-                                            String reason) {
-        try {
-            if (context == null || account == null || account.uuid == null ||
-                    message == null || message.id == null || familyId <= 0)
-                return false;
-
-            SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
-            DaoSpamFamily familyDao = intelligence.family();
-            EntitySpamFamily family = familyDao.getFamily(familyId);
-            if (family == null || family.id == null ||
-                    !account.uuid.equals(family.account_uuid))
-                return false;
-
-            EntityAliasDelivery delivery = intelligence.alias()
-                    .getDelivery(account.uuid, message.id);
-            if (delivery == null)
-                return false;
-            if (delivery.label == EntityAliasDelivery.LABEL_SPAM &&
-                    delivery.family_id != null && delivery.family_id == familyId)
-                return false;
-
-            EntitySpamFamilyExclusion exclusion = new EntitySpamFamilyExclusion();
-            exclusion.account_uuid = account.uuid;
-            exclusion.message_id = message.id;
-            exclusion.family_id = familyId;
-            exclusion.created_at = System.currentTimeMillis();
-            exclusion.reason = reason == null ? null : reason.trim();
-            familyDao.insertExclusion(exclusion);
-
-            if (delivery.predicted_family_id != null &&
-                    delivery.predicted_family_id == familyId)
-                familyDao.clearFamilyMatch(account.uuid, message.id,
-                        System.currentTimeMillis());
-
-            refreshMessageFamilyState(context, account, message, false);
-            return true;
-        } catch (Throwable ex) {
-            Log.e(ex);
-            return false;
-        }
-    }
-
     private static void setLabel(Context context,
                                  EntityAccount account,
                                  EntityMessage message,
