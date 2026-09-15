@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Triggered after the workflow was installed so the patch runs on this branch.
 from pathlib import Path
 
 
@@ -12,14 +11,20 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
 
 
 dao = Path("app/src/main/java/eu/faircode/email/DaoAlias.java")
-old_clause = '''            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)" +'''
-new_clause = '''            " AND (traffic_verdict = 'SUSPICIOUS'" +
-            "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))" +'''
-text = dao.read_text(encoding="utf-8")
-count = text.count(old_clause)
-if count != 2:
-    raise SystemExit(f"exact review queue clauses: expected 2 matches, found {count}")
-dao.write_text(text.replace(old_clause, new_clause), encoding="utf-8")
+replace_once(
+    dao,
+    '''            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)" +''',
+    '''            " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))" +''',
+    "exact review queue list clause",
+)
+replace_once(
+    dao,
+    '''            " AND (traffic_verdict = 'SUSPICIOUS' OR predicted_family_id IS NOT NULL)")''',
+    '''            " AND (traffic_verdict = 'SUSPICIOUS'" +
+            "   OR (predicted_family_id IS NOT NULL AND family_score >= 0.999999))")''',
+    "exact review queue count clause",
+)
 
 activity = Path("app/src/main/java/eu/faircode/email/ActivitySpamControl.java")
 replace_once(
