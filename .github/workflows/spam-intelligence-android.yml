@@ -1,4 +1,4 @@
-# Gate trigger: alias separation and SMTP veto UX
+# Gate trigger: SMTP veto compile fix + exact queue totals
 name: Spam Intelligence Android Compile
 
 on:
@@ -39,6 +39,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/EntitySpam*.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamControlPolicy.java'
+      - 'app/src/main/java/eu/faircode/email/SpamControlQueueStats.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
