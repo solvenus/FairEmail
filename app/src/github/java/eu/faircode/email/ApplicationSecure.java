@@ -39,10 +39,11 @@ public class ApplicationSecure extends ApplicationEx implements ProviderInstalle
         super.onCreate();
 
         // The custom intelligence layer must be alive before a user can act on
-        // already-synced mail. Both calls are background/idempotent and must not
+        // already-synced mail. All calls are background/idempotent and must not
         // be able to block normal FairEmail startup.
         try {
             SpamIntentObserver.start(this);
+            SpamFamilyRescorer.start(this);
             AliasBackfill.schedule(this);
         } catch (Throwable ex) {
             Log.e(ex);
