@@ -1,0 +1,37 @@
+name: Audit Spam Control entrypoints
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/workflows/audit-spam-control-entrypoints.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Prove old lab has no competing internal entrypoint
+        run: |
+          set -euo pipefail
+          OUT="$(mktemp)"
+          git grep -n 'ActivitySpamFamilyLab' -- app \
+            ':!app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java' \
+            ':!app/src/githubDebug/AndroidManifest.xml' > "$OUT" || true
+          if [ -s "$OUT" ]; then
+            echo 'Unexpected references to old Spam Family Lab:' >&2
+            cat "$OUT" >&2
+            exit 1
+          fi
+          echo 'PASS: old lab is not linked from any other app source'
+
+          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml
+          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml
+          grep -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml
+          grep -A4 -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml | grep -F 'android:exported="false"'
+          echo 'PASS: ActivitySpamControl is launcher; old lab is non-exported fallback only'
