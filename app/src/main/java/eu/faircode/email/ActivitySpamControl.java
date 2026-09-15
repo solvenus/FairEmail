@@ -751,15 +751,21 @@ public class ActivitySpamControl extends ActivityBase {
         search.setHint("Søk i valgt aliasgruppe");
         llPage.addView(search, matchWrapWithMargin(0, 0, 0, 8));
 
-        LinearLayout bucketRow = new LinearLayout(this);
-        bucketRow.setOrientation(LinearLayout.HORIZONTAL);
+        LinearLayout bucketRowTop = new LinearLayout(this);
+        bucketRowTop.setOrientation(LinearLayout.HORIZONTAL);
         Button spam = secondaryButton("Spam / kompromitterte (" + countAliasBucket(0) + ")");
         Button legit = secondaryButton("Legitime (" + countAliasBucket(1) + ")");
+        bucketRowTop.addView(spam, weightedButton());
+        bucketRowTop.addView(legit, weightedButton());
+        llPage.addView(bucketRowTop, matchWrapWithMargin(0, 0, 0, 4));
+
+        LinearLayout bucketRowBottom = new LinearLayout(this);
+        bucketRowBottom.setOrientation(LinearLayout.HORIZONTAL);
         Button unresolved = secondaryButton("Uavklarte (" + countAliasBucket(2) + ")");
-        bucketRow.addView(spam, weightedButton());
-        bucketRow.addView(legit, weightedButton());
-        bucketRow.addView(unresolved, weightedButton());
-        llPage.addView(bucketRow, matchWrapWithMargin(0, 0, 0, 8));
+        Button inactive = secondaryButton("Inaktive (" + countAliasBucket(3) + ")");
+        bucketRowBottom.addView(unresolved, weightedButton());
+        bucketRowBottom.addView(inactive, weightedButton());
+        llPage.addView(bucketRowBottom, matchWrapWithMargin(0, 0, 0, 8));
 
         TextView description = bodyText("");
         description.setPadding(0, 0, 0, dp(7));
@@ -769,7 +775,7 @@ public class ActivitySpamControl extends ActivityBase {
         list.setOrientation(LinearLayout.VERTICAL);
         llPage.addView(list, matchWrap());
 
-        final Button[] buttons = {spam, legit, unresolved};
+        final Button[] buttons = {spam, legit, unresolved, inactive};
         final Runnable[] repopulate = new Runnable[1];
         repopulate[0] = () -> {
             for (int i = 0; i < buttons.length; i++) {
@@ -794,6 +800,10 @@ public class ActivitySpamControl extends ActivityBase {
             aliasBucketSelection = 2;
             repopulate[0].run();
         });
+        inactive.setOnClickListener(v -> {
+            aliasBucketSelection = 3;
+            repopulate[0].run();
+        });
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
             @Override public void onTextChanged(CharSequence s, int start, int before, int count) { repopulate[0].run(); }
@@ -812,10 +822,12 @@ public class ActivitySpamControl extends ActivityBase {
 
     private String aliasBucketDescription(int bucket) {
         if (bucket == 0)
-            return "Spamtrafikk, kompromitterte/erstattede aliaser og SMTP-styrte aliaser.";
+            return "Kompromitterte/erstattede aliaser, SMTP-styrte aliaser og uløste kompromissavgjørelser.";
         if (bucket == 1)
-            return "Aktive aliaser med Innboks-trafikk eller eksplisitt Ikke spam, uten spam/problemstate.";
-        return "Aliaser som foreløpig mangler nok sunn trafikk eller spam-evidens til å plasseres sikkert.";
+            return "Aktive legitime aliaser. En spam-mail flytter ikke aliaset hitfra når lekkasje allerede er avkreftet.";
+        if (bucket == 2)
+            return "Aktive aliaser som foreløpig mangler nok evidens til en sikker plassering.";
+        return "Aliaser du eksplisitt har satt til DISABLED eller IGNORED.";
     }
 
     private String aliasBucketEmptyText(int bucket) {
@@ -823,7 +835,9 @@ public class ActivitySpamControl extends ActivityBase {
             return "Ingen spam-/kompromitterte aliaser matcher søket.";
         if (bucket == 1)
             return "Ingen legitime aliaser matcher søket.";
-        return "Ingen uavklarte aliaser matcher søket.";
+        if (bucket == 2)
+            return "Ingen uavklarte aliaser matcher søket.";
+        return "Ingen inaktive aliaser matcher søket.";
     }
 
     private void populateAliasBucket(LinearLayout list, String query, int bucket, String emptyText) {
@@ -844,22 +858,41 @@ public class ActivitySpamControl extends ActivityBase {
             list.addView(bodyText(emptyText), matchWrap());
     }
 
-    /** 0=spam/problem, 1=legitimate, 2=unresolved. */
+    /** 0=spam/problem, 1=legitimate, 2=unresolved, 3=inactive. */
     private int aliasBucket(EntityAlias alias) {
         int spam = alias.spam_hits == null ? 0 : alias.spam_hits;
         int ham = alias.ham_hits == null ? 0 : alias.ham_hits;
         int smtp = alias.smtp_reject_state == null
                 ? EntityAlias.SMTP_REJECT_NONE : alias.smtp_reject_state;
 
-        if (spam > 0 ||
-                alias.state == EntityAlias.STATE_COMPROMISED ||
+        // Physical SMTP state and explicit compromised/replaced lifecycle are
+        // problem work regardless of the message-level spam counters.
+        if (alias.state == EntityAlias.STATE_COMPROMISED ||
                 alias.state == EntityAlias.STATE_REPLACED ||
                 smtp != EntityAlias.SMTP_REJECT_NONE)
             return 0;
 
-        if (alias.state == EntityAlias.STATE_ACTIVE &&
-                (ham > 0 || aliasHasInboxTraffic(alias)))
-            return 1;
+        if (alias.state == EntityAlias.STATE_DISABLED ||
+                alias.state == EntityAlias.STATE_IGNORED)
+            return 3;
+
+        boolean compromiseReview = alias.state == EntityAlias.STATE_ACTIVE &&
+                spam > 0 && SpamControlPolicy.markAliasCompromised(this) &&
+                AliasCompromiseReviewStore.needsReview(this, alias);
+        if (compromiseReview)
+            return 0;
+
+        if (alias.state == EntityAlias.STATE_ACTIVE) {
+            if (ham > 0 || aliasHasInboxTraffic(alias))
+                return 1;
+
+            // With compromise intelligence enabled, an active alias with spam
+            // whose current spam count no longer needs review has explicitly
+            // been resolved healthy by the user/policy. Spam truth does not
+            // become alias-leak truth.
+            if (spam > 0 && SpamControlPolicy.markAliasCompromised(this))
+                return 1;
+        }
 
         return 2;
     }
