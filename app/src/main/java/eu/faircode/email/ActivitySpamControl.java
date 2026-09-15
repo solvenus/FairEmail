@@ -49,6 +49,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 
 import javax.mail.Address;
@@ -78,6 +79,7 @@ public class ActivitySpamControl extends ActivityBase {
     }
 
     private final AtomicLong reviewGeneration = new AtomicLong();
+    private final AtomicBoolean reviewActionRunning = new AtomicBoolean(false);
     private final Map<Section, Button> navButtons = new EnumMap<>(Section.class);
     private final Map<Long, String> familyDescriptors = new HashMap<>();
     private List<SpamNetworkAnalyzer.Network> networks = Collections.emptyList();
@@ -585,15 +587,19 @@ public class ActivitySpamControl extends ActivityBase {
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
         actions.setPadding(0, dp(14), 0, 0);
+        boolean actionIdle = !reviewActionRunning.get();
         Button spam = primaryButton("Spam");
+        spam.setEnabled(actionIdle && candidate.label != EntityAliasDelivery.LABEL_SPAM);
         spam.setOnClickListener(v -> runReviewAction(candidate, true));
         actions.addView(spam, weightedButton());
         Button ham = primaryButton("Ikke spam");
+        ham.setEnabled(actionIdle && candidate.label != EntityAliasDelivery.LABEL_HAM);
         ham.setOnClickListener(v -> runReviewAction(candidate, false));
         actions.addView(ham, weightedButton());
         content.addView(actions, matchWrap());
 
         Button skip = secondaryButton("Hopp over");
+        skip.setEnabled(actionIdle);
         skip.setOnClickListener(v -> {
             reviewIndex++;
             if (reviewIndex >= reviewQueue.size())
@@ -610,7 +616,15 @@ public class ActivitySpamControl extends ActivityBase {
         EntityAccount account = selectedAccount;
         if (account == null || account.uuid == null)
             return;
+        if ((spam && candidate.label == EntityAliasDelivery.LABEL_SPAM) ||
+                (!spam && candidate.label == EntityAliasDelivery.LABEL_HAM))
+            return;
+        if (!reviewActionRunning.compareAndSet(false, true))
+            return;
+
         tvStatus.setText(spam ? "Lagrer spam …" : "Lagrer ikke spam …");
+        if (section == Section.REVIEW)
+            renderCurrent();
         long familyContext = candidate.predictedFamilyId == null ? 0L : candidate.predictedFamilyId;
         executor.execute(() -> {
             SpamFamilyLabRepository.ActionResult result = SpamUndoManager.runMessageAction(
@@ -621,8 +635,14 @@ public class ActivitySpamControl extends ActivityBase {
                             ? SpamFamilyLabRepository.markSpam(getApplicationContext(), account.uuid, candidate.messageId)
                             : SpamFamilyLabRepository.markLegitimate(getApplicationContext(), account.uuid, candidate.messageId));
             runOnUiThread(() -> {
-                if (!isSelected(account) || isFinishing() || isDestroyed())
+                reviewActionRunning.set(false);
+                if (isFinishing() || isDestroyed())
                     return;
+                if (!isSelected(account)) {
+                    if (section == Section.REVIEW)
+                        renderCurrent();
+                    return;
+                }
                 if (result == SpamFamilyLabRepository.ActionResult.APPLIED) {
                     String text = spam ? "Lagret som spam." : "Lagret som ikke spam.";
                     tvStatus.setText(text);
@@ -639,6 +659,7 @@ public class ActivitySpamControl extends ActivityBase {
                     loadReviewQueue(account, false);
                 } else {
                     tvStatus.setText("Kunne ikke lagre endringen.");
+                    renderCurrent();
                     loadReviewQueue(account, false);
                 }
             });

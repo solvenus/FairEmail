@@ -258,10 +258,12 @@ public final class SpamIntelligence {
                             context, account.uuid, message.id, fingerprint, identity.key);
                     familyId = familyLearn.familyId;
                 } else if (fingerprint != null) {
-                    // Conservative fallback only when a message genuinely lacks
-                    // the sender-name/subject pair needed for exact identity.
-                    familyLearn = SpamFamilyStore.learnSpam(
-                            context, account.uuid, message.id, fingerprint);
+                    // Missing identity data must never re-enable fuzzy family joining.
+                    // Keep the message in a deterministic one-message family until a
+                    // complete sender-name + subject identity becomes available.
+                    familyLearn = SpamFamilyStore.learnSpamExact(
+                            context, account.uuid, message.id, fingerprint,
+                            SpamFamilyIdentity.isolatedMessageKey(message.id));
                     familyId = familyLearn.familyId;
                 }
 

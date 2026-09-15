@@ -35,6 +35,16 @@ public final class SpamFamilyIdentity {
         return new Identity(name, title, VERSION + ":" + hex64(fnv1a64(canonical)));
     }
 
+    /**
+     * Deterministic per-message key for spam that lacks the complete
+     * sender-name + subject pair. It deliberately cannot match another message.
+     */
+    public static String isolatedMessageKey(long messageId) {
+        if (messageId <= 0)
+            return null;
+        return VERSION + ":isolated-message:" + Long.toUnsignedString(messageId);
+    }
+
     public static String metaKey(String accountUuid, String identityKey) {
         if (accountUuid == null || identityKey == null)
             return null;

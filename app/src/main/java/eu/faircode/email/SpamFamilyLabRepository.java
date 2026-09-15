@@ -78,13 +78,42 @@ public final class SpamFamilyLabRepository {
             if (message == null)
                 continue;
 
+            boolean suspiciousAlias = "SUSPICIOUS".equals(delivery.traffic_verdict);
+            boolean exactPrediction = false;
+            if (delivery.predicted_family_id != null) {
+                if (SpamControlPolicy.exactFamilyDetection(context)) {
+                    SpamFamilyIdentity.Identity identity =
+                            SpamFamilyMessageAdapter.identityFromMessage(message);
+                    if (identity != null) {
+                        SpamFamilyStore.Match exact = SpamFamilyStore.matchIdentity(
+                                context, account, delivery.message_id, identity.key);
+                        exactPrediction = exact.familyId != null &&
+                                exact.familyId.longValue() == delivery.predicted_family_id.longValue();
+                    }
+                }
+
+                if (!exactPrediction) {
+                    // Legacy fuzzy predictions are derived cache, never human truth.
+                    // Clear them eagerly so even a historical 100% fuzzy score cannot
+                    // masquerade as an exact sender-name + subject match.
+                    intelligence.family().clearFamilyMatch(
+                            account, delivery.message_id, System.currentTimeMillis());
+                    delivery = aliasDao.getDelivery(account, delivery.message_id);
+                    if (delivery == null)
+                        continue;
+                }
+            }
+
+            if (!suspiciousAlias && !exactPrediction)
+                continue;
+
             EntityAlias alias = null;
             try {
                 alias = aliasDao.getAlias(account, delivery.address);
             } catch (Throwable ex) {
                 Log.w(ex);
             }
-            Long contextFamily = delivery.predicted_family_id != null
+            Long contextFamily = exactPrediction
                     ? delivery.predicted_family_id : delivery.family_id;
             result.add(Candidate.from(delivery, message, alias, contextFamily));
         }
