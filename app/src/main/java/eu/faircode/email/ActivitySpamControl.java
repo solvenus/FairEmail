@@ -1024,6 +1024,35 @@ public class ActivitySpamControl extends ActivityBase {
         return card;
     }
 
+    private String aliasTimelineText(EntityAlias alias) {
+        if (alias == null)
+            return "Ingen tidslinje tilgjengelig.";
+        StringBuilder text = new StringBuilder();
+        text.append("Først sett: ").append(formatWhen(alias.first_seen))
+                .append("\nSist sett: ").append(formatWhen(alias.last_seen))
+                .append("\nSiste legitime trafikk: ").append(formatWhen(alias.last_ham))
+                .append("\nSiste spam: ").append(formatWhen(alias.last_spam))
+                .append("\nTrafikk: ")
+                .append(alias.messages == null ? 0 : alias.messages).append(" meldinger · ")
+                .append(alias.ham_hits == null ? 0 : alias.ham_hits).append(" legit · ")
+                .append(alias.spam_hits == null ? 0 : alias.spam_hits).append(" spam");
+
+        if (!TextUtils.isEmpty(alias.replaced_by))
+            text.append("\nReplacement: ").append(alias.replaced_by);
+        if (alias.smtp_reject_requested_at != null)
+            text.append("\nSMTP-operasjon forespurt: ")
+                    .append(formatWhen(alias.smtp_reject_requested_at));
+        if (alias.smtp_reject_verified_at != null)
+            text.append("\nSMTP read-back verifisert: ")
+                    .append(formatWhen(alias.smtp_reject_verified_at));
+        if (!TextUtils.isEmpty(alias.smtp_reject_error))
+            text.append("\nSiste SMTP-feil: ").append(alias.smtp_reject_error);
+
+        text.append("\nNå: ").append(aliasState(alias))
+                .append(" · SMTP ").append(smtpState(alias));
+        return text.toString();
+    }
+
     private void showAliasEditor(EntityAlias alias) {
         LinearLayout form = dialogForm();
         EditText service = input("Tjeneste", alias.service);
@@ -1041,10 +1070,12 @@ public class ActivitySpamControl extends ActivityBase {
         observed.setPadding(0, dp(8), 0, dp(6));
         form.addView(observed, matchWrap());
 
-        TextView history = bodyText("Først sett: " + formatWhen(alias.first_seen) +
-                "\nSist sett: " + formatWhen(alias.last_seen) +
-                "\nSiste spam: " + formatWhen(alias.last_spam));
-        history.setPadding(0, dp(3), 0, dp(8));
+        TextView timelineTitle = valueText("Tidslinje", 15f, true);
+        timelineTitle.setPadding(0, dp(5), 0, dp(2));
+        form.addView(timelineTitle, matchWrap());
+        TextView history = bodyText(aliasTimelineText(alias));
+        history.setTextIsSelectable(true);
+        history.setPadding(0, dp(1), 0, dp(8));
         form.addView(history, matchWrap());
 
         form.addView(replacement, matchWrap());
