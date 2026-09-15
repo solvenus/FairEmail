@@ -70,8 +70,8 @@ public final class SpamFamilyLab {
     private static void aliasReputationChecks() {
         String alias = SpamAliasReputation.normalizeAddress(
                 "Example Service <SD_Service@Example.org>");
-        require("sd_service@example.org".equals(alias),
-                "alias normalization must survive display-name/address syntax");
+        require("SD_Service@example.org".equals(alias),
+                "alias normalization must preserve local-part case and normalize the domain");
 
         SpamAliasReputation.Model reputation = new SpamAliasReputation.Model();
         for (int i = 0; i < 12; i++)
