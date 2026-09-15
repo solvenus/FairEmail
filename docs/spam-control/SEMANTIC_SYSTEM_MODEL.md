@@ -113,7 +113,7 @@ Physical SMTP truth comes from cPanel/UAPI read-back through `CpanelAliasActuato
 | SMTP rejection lifecycle | verified server read-back + `alias.smtp_reject_*` | UI/readiness | local COMPROMISED state |
 | Family identity | canonical sender-name + subject mapping | family descriptor | body/template/link fuzziness |
 | Legacy exclusion rows | recovery compatibility only | snapshots | exact-family authority |
-| Reply desired From alias | original envelope/recipient evidence resolved to `ref.deliveredto` | Alias Registry capability validation | sender From-address |
+| Reply desired From alias | original envelope/recipient evidence resolved to authoritative `replyDeliveredTo` | persisted `ref.deliveredto` + Alias Registry capability validation | sender From-address |
 
 **Ownership rule:** a table/cache/mirror does not gain authority because it exists. Authority changes require this model + Decision Ledger + migration + regression evidence.
 
@@ -152,9 +152,9 @@ A one-message UI action is not permission to globally rebind an arbitrary canoni
 
 ### Reply alias
 
-**Producer chain:** original envelope headers / original recipients / retained delivered-to evidence → resolved `ref.deliveredto` → per-message re-observation/alias synchronization.
+**Producer chain:** original envelope headers / original recipients / retained delivered-to evidence → authoritative `replyDeliveredTo` → persisted `ref.deliveredto` → per-message re-observation/alias synchronization.
 
-**Consumer chain:** `SpamIntelligence.resolveReplyExtra(context, selected, ref.deliveredto)` → `draft.extra` → FairEmail sender-extra From address.
+**Consumer chain:** `SpamIntelligence.resolveReplyExtra(context, selected, replyDeliveredTo)` → `draft.extra` → FairEmail sender-extra From address.
 
 Spam classification/family state is not reply-alias authority.
 
@@ -275,7 +275,7 @@ Undo snapshots **before** mutation and marks history undone only after restore s
 
 - **INV-P01** Original envelope evidence outranks later routing `Delivered-To` when recovering the reply alias.
 - **INV-P02** The resolved original delivery alias becomes `ref.deliveredto` and is re-observed before reply-extra resolution.
-- **INV-P03** `resolveReplyExtra` uses `ref.deliveredto`, and the resolved extra is written to the draft.
+- **INV-P03** `resolveReplyExtra` consumes the same authoritative `replyDeliveredTo` value that is persisted to `ref.deliveredto`, and the resolved extra is written to the draft.
 - **INV-P04** Spam Control family/classification refactors may not redefine reply-alias authority.
 
 ---
