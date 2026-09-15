@@ -1,3 +1,4 @@
+# Trigger: advisory preflight must not become false SMTP failure state
 name: Apply cPanel preflight state truth
 
 on:
