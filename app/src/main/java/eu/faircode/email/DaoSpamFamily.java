@@ -37,23 +37,23 @@ public interface DaoSpamFamily {
             " f.updated_at AS updated_at," +
             " (SELECT COUNT(*) FROM spam_family_exemplar e" +
             "   WHERE e.family_id = f.id) AS exemplar_count," +
-            " (SELECT COUNT(*) FROM alias_delivery d" +
+            " (SELECT COUNT(*) FROM spam_message d" +
             "   WHERE d.account_uuid = f.account_uuid" +
             "   AND d.predicted_family_id = f.id) AS predicted_count," +
-            " (SELECT COUNT(*) FROM alias_delivery d" +
+            " (SELECT COUNT(*) FROM spam_message d" +
             "   WHERE d.account_uuid = f.account_uuid" +
             "   AND d.predicted_family_id = f.id" +
             "   AND d.family_score >= :strongThreshold) AS strong_count," +
-            " (SELECT COUNT(*) FROM alias_delivery d" +
+            " (SELECT COUNT(*) FROM spam_message d" +
             "   WHERE d.account_uuid = f.account_uuid" +
             "   AND d.predicted_family_id = f.id" +
             "   AND d.family_score >= :strongThreshold" +
-            "   AND d.label = " + EntityAliasDelivery.LABEL_UNKNOWN + ") AS strong_unknown_count," +
-            " (SELECT COUNT(*) FROM alias_delivery d" +
+            "   AND d.label = " + EntitySpamMessage.LABEL_UNKNOWN + ") AS strong_unknown_count," +
+            " (SELECT COUNT(*) FROM spam_message d" +
             "   WHERE d.account_uuid = f.account_uuid" +
             "   AND d.predicted_family_id = f.id" +
             "   AND d.family_score >= :strongThreshold" +
-            "   AND d.label = " + EntityAliasDelivery.LABEL_HAM + ") AS strong_ham_count," +
+            "   AND d.label = " + EntitySpamMessage.LABEL_HAM + ") AS strong_ham_count," +
             " (SELECT MAX(d.family_score) FROM alias_delivery d" +
             "   WHERE d.account_uuid = f.account_uuid" +
             "   AND d.predicted_family_id = f.id) AS max_score," +
@@ -128,9 +128,9 @@ public interface DaoSpamFamily {
     @Query("SELECT COUNT(*) FROM spam_family_exemplar WHERE family_id = :familyId")
     int countExemplars(long familyId);
 
-    @Query("SELECT COUNT(*) FROM alias_delivery" +
+    @Query("SELECT COUNT(*) FROM spam_message" +
             " WHERE family_id = :familyId" +
-            " AND label = " + EntityAliasDelivery.LABEL_SPAM)
+            " AND label = " + EntitySpamMessage.LABEL_SPAM)
     int countConfirmedMembers(long familyId);
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
