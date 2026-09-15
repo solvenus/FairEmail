@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# Triggered after the workflow was installed so the patch runs on this branch.
 from pathlib import Path
 
 
