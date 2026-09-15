@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/spam-control-p0
+      - changeset/spam-control-semantic-architecture-v2
       - audit/spam-control-alias-sideeffects
     paths:
       - '.github/scripts/verify_spam_control_alias_sideeffects.py'
