@@ -14,12 +14,11 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * Pure-Java policy for the lifecycle AFTER an alias has spam evidence.
+ * Pure-Java policy for the lifecycle AFTER spam and alias compromise have been
+ * evaluated as separate truths.
  *
- * This class never decides whether a message is spam. It only answers what is
- * safe to do with an alias whose explicit history is already known. V1 is
- * deliberately conservative: an alias with legitimate/service evidence must
- * be rotated before server rejection becomes ready.
+ * A spam hit alone never authorizes SMTP burn. The alias lifecycle must itself
+ * be COMPROMISED/REPLACED before the destructive server action can become ready.
  */
 public final class AliasBurnPolicy {
     private AliasBurnPolicy() {
@@ -35,6 +34,7 @@ public final class AliasBurnPolicy {
 
     public enum Verdict {
         HEALTHY,
+        REVIEW_COMPROMISE,
         COMPROMISED,
         ROTATE_FIRST,
         READY_TO_BURN,
@@ -46,6 +46,7 @@ public final class AliasBurnPolicy {
     public static final class Input {
         public int spamHits;
         public int hamHits;
+        public boolean aliasCompromised;
         public boolean serviceDomainKnown;
         public boolean trustedDomainsConfigured;
         public boolean replacementConfigured;
@@ -83,7 +84,7 @@ public final class AliasBurnPolicy {
         List<String> reasons = new ArrayList<>();
         int spam = Math.max(0, input.spamHits);
         int ham = Math.max(0, input.hamHits);
-        boolean compromised = spam > 0;
+        boolean compromised = input.aliasCompromised;
 
         if (input.serverState == ServerState.REJECT_VERIFIED) {
             reasons.add("smtp-rejection-verified");
@@ -100,11 +101,18 @@ public final class AliasBurnPolicy {
         }
 
         if (!compromised) {
+            if (spam > 0) {
+                reasons.add("confirmed-spam=" + spam);
+                reasons.add("alias-compromise-not-confirmed");
+                return new Result(Verdict.REVIEW_COMPROMISE, false, false, reasons);
+            }
             reasons.add("no-confirmed-spam");
             return new Result(Verdict.HEALTHY, false, false, reasons);
         }
 
-        reasons.add("confirmed-spam=" + spam);
+        reasons.add("alias-compromise-confirmed");
+        if (spam > 0)
+            reasons.add("confirmed-spam=" + spam);
 
         if (input.replacementConfigured) {
             reasons.add("replacement-configured");
@@ -125,9 +133,6 @@ public final class AliasBurnPolicy {
             return new Result(Verdict.ROTATE_FIRST, true, false, reasons);
         }
 
-        // A leaked address with no known legitimate context is still not burned
-        // automatically in V1. The user can explicitly set a replacement or use
-        // a future force-burn action after inspecting the registry entry.
         reasons.add("no-replacement-yet");
         return new Result(Verdict.COMPROMISED, true, false, reasons);
     }
