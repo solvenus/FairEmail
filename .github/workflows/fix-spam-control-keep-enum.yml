@@ -1,0 +1,38 @@
+name: Fix Spam Control compromise enum compile
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/fix_spam_control_keep_enum.py'
+      - '.github/workflows/fix-spam-control-keep-enum.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply exact enum compile fix
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/fix_spam_control_keep_enum.py
+          git diff --check
+          git status --short
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/SpamIntelligence.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Fix compromise KEEP enum integration"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
