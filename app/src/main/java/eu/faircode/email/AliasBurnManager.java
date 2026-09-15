@@ -103,10 +103,11 @@ public final class AliasBurnManager {
                 return Outcome.verified(result.changed);
             }
 
-            if (isUnsafeRestorePreflight(result.error)) {
-                // Restore was refused before mutation because the original raw
-                // route cannot be reproduced. The server is still hard-dead,
-                // so preserve VERIFIED instead of inventing a server failure.
+            if (restorePreservedVerifiedState(result.error)) {
+                // Either restore was refused before any server mutation or the
+                // transaction verified that its rollback recreated the exact
+                // pre-restore hard-fail state. Keep the last known physical
+                // truth as VERIFIED instead of inventing SMTP_REJECT_FAILED.
                 dao.markSmtpRejectVerified(accountUuid, alias,
                         previouslyVerifiedAt == null
                                 ? System.currentTimeMillis() : previouslyVerifiedAt);
@@ -141,8 +142,13 @@ public final class AliasBurnManager {
         return error != null && error.startsWith("unsafe-required:");
     }
 
-    private static boolean isUnsafeRestorePreflight(String error) {
-        return error != null && error.startsWith("restore-unsafe-route:");
+    private static boolean restorePreservedVerifiedState(String error) {
+        if (error == null)
+            return false;
+        return error.startsWith("restore-unsafe-route:") ||
+                error.startsWith("preflight-list-failed:") ||
+                error.equals("invalid-route-snapshot") ||
+                error.endsWith(":rolled-back");
     }
 
     /** Avoid accidentally persisting credentials or giant remote response bodies. */
