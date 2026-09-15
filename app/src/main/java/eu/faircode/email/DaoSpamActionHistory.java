@@ -30,6 +30,9 @@ public interface DaoSpamActionHistory {
             " WHERE id = :id AND undone_at IS NULL")
     int markUndone(long id, long undoneAt);
 
+    @Query("DELETE FROM spam_action_history WHERE id = :id")
+    int delete(long id);
+
     @Query("DELETE FROM spam_action_history WHERE account_uuid = :accountUuid")
     int deleteForAccount(String accountUuid);
 }
