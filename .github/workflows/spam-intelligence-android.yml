@@ -1,4 +1,4 @@
-# Gate trigger: SMTP veto compile fix + exact queue totals
+# Gate trigger: combined Spam Control P0 after veto, alias separation, compromise truth and undo
 name: Spam Intelligence Android Compile
 
 on:
