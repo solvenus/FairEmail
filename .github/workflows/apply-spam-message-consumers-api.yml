@@ -1,6 +1,6 @@
 name: Apply canonical Spam message consumers via API
 
-# trigger: canonical consumers
+# trigger: canonical consumers v3
 on:
   push:
     branches: [feature/spam-control-p0]
@@ -31,6 +31,7 @@ jobs:
             'app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java',
             'app/src/main/java/eu/faircode/email/SpamFamilyRescorer.java',
             'app/src/main/java/eu/faircode/email/DaoSpamFamily.java']
+          dao_path='app/src/main/java/eu/faircode/email/DaoSpamMessage.java'
           script_path='.github/scripts/patch_spam_message_consumers.py'
           headers={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'spam-message-consumer-patcher'}
           def get(path):
@@ -47,9 +48,23 @@ jobs:
               root=pathlib.Path(td)
               for p,obj in current.items():
                   q=root/p; q.parent.mkdir(parents=True,exist_ok=True); q.write_text(base64.b64decode(obj['content']).decode())
+              # The patcher intentionally expects the same review predicate twice.
+              # Normalize only the COUNT query in this temporary workspace so the
+              # fail-closed patcher can transform both; remove the empty concat after.
+              q=root/dao_path
+              txt=q.read_text()
+              old='''            "   OR predicted_family_id IS NOT NULL)")\n    int countReviewQueue'''
+              new='''            "   OR predicted_family_id IS NOT NULL)" +\n            "")\n    int countReviewQueue'''
+              if txt.count(old) != 1: raise SystemExit('temporary COUNT normalization mismatch')
+              q.write_text(txt.replace(old,new,1))
               s=root/script_path; s.parent.mkdir(parents=True,exist_ok=True); s.write_text(base64.b64decode(script['content']).decode())
               subprocess.run(['python3',str(s)],cwd=root,check=True)
               outputs={p:(root/p).read_text() for p in files}
+              txt=outputs[dao_path]
+              old='''            "       AND d.traffic_verdict = 'SUSPICIOUS'))" +\n            "")\n    int countReviewQueue'''
+              new='''            "       AND d.traffic_verdict = 'SUSPICIOUS'))")\n    int countReviewQueue'''
+              if txt.count(old) != 1: raise SystemExit('temporary COUNT cleanup mismatch')
+              outputs[dao_path]=txt.replace(old,new,1)
           checks={
             files[0]:['List<EntitySpamMessage> states','Candidate.from(state, delivery','message().get(resolved.account.uuid, messageId)'],
             files[1]:['.message().countReviewQueue'],
