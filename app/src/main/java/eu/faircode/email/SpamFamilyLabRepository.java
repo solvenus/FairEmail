@@ -19,10 +19,18 @@ import java.util.List;
 
 import javax.mail.Address;
 
-/** Read/write facade for the observer-only Spam Family Lab UI. */
+/** Read/write facade for the observer-first Spam Family Lab UI. */
 public final class SpamFamilyLabRepository {
     public static final double STRONG_THRESHOLD = SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD;
     private static final int MAX_CANDIDATES = 500;
+
+    public enum ActionResult {
+        APPLIED,
+        MESSAGE_MISSING,
+        ACCOUNT_MISMATCH,
+        FAMILY_MISSING,
+        REJECTED
+    }
 
     private SpamFamilyLabRepository() {
     }
@@ -66,6 +74,67 @@ public final class SpamFamilyLabRepository {
         return result;
     }
 
+    /** Explicitly confirm this locally available message as spam in this exact family. */
+    public static ActionResult confirmSpam(Context context,
+                                           String accountUuid,
+                                           long familyId,
+                                           long messageId) {
+        Resolved resolved = resolve(context, accountUuid, messageId);
+        if (resolved.result != null)
+            return resolved.result;
+
+        EntitySpamFamily family = SpamIntelligenceDB.getInstance(context)
+                .family().getFamily(familyId);
+        if (family == null || family.id == null ||
+                !resolved.account.uuid.equals(family.account_uuid))
+            return ActionResult.FAMILY_MISSING;
+
+        SpamIntelligence.learnSpam(context, resolved.account, resolved.message, familyId);
+        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
+                .alias().getDelivery(resolved.account.uuid, messageId);
+        return after != null &&
+                after.label == EntityAliasDelivery.LABEL_SPAM &&
+                after.family_id != null && after.family_id == familyId
+                ? ActionResult.APPLIED : ActionResult.REJECTED;
+    }
+
+    /** Explicit HAM correction. This is intentionally different from Not this family. */
+    public static ActionResult markLegitimate(Context context,
+                                              String accountUuid,
+                                              long messageId) {
+        Resolved resolved = resolve(context, accountUuid, messageId);
+        if (resolved.result != null)
+            return resolved.result;
+
+        SpamIntelligence.learnHam(context, resolved.account, resolved.message);
+        EntityAliasDelivery after = SpamIntelligenceDB.getInstance(context)
+                .alias().getDelivery(resolved.account.uuid, messageId);
+        return after != null && after.label == EntityAliasDelivery.LABEL_HAM
+                ? ActionResult.APPLIED : ActionResult.REJECTED;
+    }
+
+    /** Exclude this message/family pair without making a spam-vs-ham claim. */
+    public static ActionResult excludeFromFamily(Context context,
+                                                 String accountUuid,
+                                                 long familyId,
+                                                 long messageId) {
+        Resolved resolved = resolve(context, accountUuid, messageId);
+        if (resolved.result != null)
+            return resolved.result;
+
+        EntitySpamFamily family = SpamIntelligenceDB.getInstance(context)
+                .family().getFamily(familyId);
+        if (family == null || family.id == null ||
+                !resolved.account.uuid.equals(family.account_uuid))
+            return ActionResult.FAMILY_MISSING;
+
+        boolean accepted = SpamIntelligence.excludeFromFamily(
+                context, resolved.account, resolved.message, familyId, "family_lab");
+        int stored = SpamIntelligenceDB.getInstance(context).family()
+                .countExclusion(resolved.account.uuid, messageId, familyId);
+        return accepted && stored > 0 ? ActionResult.APPLIED : ActionResult.REJECTED;
+    }
+
     public static void renameFamily(Context context, long familyId, String name) {
         if (context == null || familyId <= 0)
             return;
@@ -84,6 +153,41 @@ public final class SpamFamilyLabRepository {
 
     public static void requestRescore(Context context, String accountUuid, long familyId) {
         SpamFamilyRescorer.enqueue(context, accountUuid, familyId);
+    }
+
+    private static Resolved resolve(Context context, String accountUuid, long messageId) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty() || messageId <= 0)
+            return Resolved.error(ActionResult.MESSAGE_MISSING);
+        try {
+            DB db = DB.getInstance(context);
+            EntityMessage message = db.message().getMessage(messageId);
+            if (message == null || message.account == null)
+                return Resolved.error(ActionResult.MESSAGE_MISSING);
+            EntityAccount account = db.account().getAccount(message.account);
+            if (account == null || account.uuid == null ||
+                    !accountUuid.trim().equals(account.uuid))
+                return Resolved.error(ActionResult.ACCOUNT_MISMATCH);
+            return new Resolved(account, message, null);
+        } catch (Throwable ex) {
+            Log.e(ex);
+            return Resolved.error(ActionResult.MESSAGE_MISSING);
+        }
+    }
+
+    private static final class Resolved {
+        final EntityAccount account;
+        final EntityMessage message;
+        final ActionResult result;
+
+        Resolved(EntityAccount account, EntityMessage message, ActionResult result) {
+            this.account = account;
+            this.message = message;
+            this.result = result;
+        }
+
+        static Resolved error(ActionResult result) {
+            return new Resolved(null, null, result);
+        }
     }
 
     public static final class Candidate {
