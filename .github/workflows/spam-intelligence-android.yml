@@ -5,7 +5,10 @@ on:
     branches:
       - feature/spam-families
     paths:
+      - 'app/src/github/AndroidManifest.xml'
+      - 'app/src/githubDebug/AndroidManifest.xml'
       - 'app/src/github/java/eu/faircode/email/ApplicationSecure.java'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java'
       - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnManager.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnPolicy.java'
@@ -33,6 +36,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntentObserver.java'
       - 'app/src/main/java/eu/faircode/email/TupleAliasDomainStats.java'
+      - 'app/src/main/java/eu/faircode/email/TupleSpamFamily*.java'
       - '.github/workflows/spam-intelligence-android.yml'
   workflow_dispatch:
 
@@ -57,3 +61,8 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
             :app:compileGithubDebugJavaWithJavac
+      - name: Assemble GitHub debug APK
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
+            :app:assembleGithubDebug
