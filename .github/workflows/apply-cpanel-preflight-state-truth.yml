@@ -1,0 +1,37 @@
+name: Apply cPanel preflight state truth
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_cpanel_preflight_state_truth.py'
+      - '.github/workflows/apply-cpanel-preflight-state-truth.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed preflight lifecycle truth patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_cpanel_preflight_state_truth.py
+          git diff --check
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/AliasBurnManager.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Preserve truthful SMTP state on cPanel preflight veto"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
