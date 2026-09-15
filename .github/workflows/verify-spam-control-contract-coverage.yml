@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - feature/spam-control-p0
-      - changeset/spam-control-semantic-architecture-v2
+      - changeset/spam-control-family-correction-semantics
     paths:
       - '.github/scripts/verify_spam_control_bootstrap_contract.py'
       - '.github/workflows/verify-spam-control-bootstrap-contract.yml'
@@ -14,6 +14,8 @@ on:
       - '.github/workflows/verify-spam-control-reset-undo-contract.yml'
       - '.github/scripts/verify_spam_control_observability_contract.py'
       - '.github/workflows/verify-spam-control-observability-contract.yml'
+      - '.github/scripts/verify_spam_exact_family_retirement.py'
+      - '.github/workflows/verify-spam-exact-family-retirement.yml'
       - '.github/scripts/verify_spam_control_contract_coverage.py'
       - '.github/workflows/verify-spam-control-contract-coverage.yml'
   workflow_dispatch:

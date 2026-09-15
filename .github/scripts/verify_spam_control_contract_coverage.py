@@ -4,8 +4,8 @@
 A semantic test that does not run when the source it protects changes is not a
 contract. This verifier derives Java consumers from each contract script and
 checks that its workflow's push paths cover every consumer, plus the script and
-workflow themselves. It also requires the operational branch and the current
-semantic-architecture ChangeSet branch while this ChangeSet is active.
+workflow themselves. It also requires the operational branch and the active
+functional ChangeSet branch.
 """
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 OPERATIONAL_BRANCH = "feature/spam-control-p0"
-CHANGESET_BRANCH = "changeset/spam-control-semantic-architecture-v2"
+CHANGESET_BRANCH = "changeset/spam-control-family-correction-semantics"
 
 CONTRACTS = {
     "bootstrap": (
@@ -33,6 +33,10 @@ CONTRACTS = {
     "observability": (
         ".github/scripts/verify_spam_control_observability_contract.py",
         ".github/workflows/verify-spam-control-observability-contract.yml",
+    ),
+    "exact-family-retirement": (
+        ".github/scripts/verify_spam_exact_family_retirement.py",
+        ".github/workflows/verify-spam-exact-family-retirement.yml",
     ),
 }
 
@@ -63,13 +67,18 @@ def yaml_list(text: str, key: str) -> list[str]:
 
 
 def consumed_java_paths(script_text: str) -> set[str]:
-    # All current contracts declare source ownership through ROOT / 'app/...java'.
-    # Deriving this list prevents the workflow from silently forgetting a newly
-    # added consumer when the contract script itself grows.
-    return set(re.findall(
+    # Contracts currently name Java consumers either directly through ROOT / 'app/...java'
+    # or through a small read("app/...java") helper. Derive both forms so adding a source
+    # consumer to a contract cannot silently outrun its workflow trigger coverage.
+    paths = set(re.findall(
         r"ROOT\s*/\s*['\"](app/src/[^'\"]+\.java)['\"]",
         script_text,
     ))
+    paths.update(re.findall(
+        r"read\(\s*['\"](app/src/[^'\"]+\.java)['\"]\s*\)",
+        script_text,
+    ))
+    return paths
 
 
 def covered(source: str, patterns: list[str]) -> bool:
@@ -115,7 +124,7 @@ def main() -> None:
     for name, (script, workflow) in CONTRACTS.items():
         verify_contract(name, script, workflow)
     print("PASS: every selected Spam Control semantic contract is wired to every Java source it reads")
-    print("PASS: operational and current ChangeSet branches are covered")
+    print("PASS: operational and active ChangeSet branches are covered")
 
 
 if __name__ == "__main__":

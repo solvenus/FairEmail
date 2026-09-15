@@ -4,7 +4,7 @@ on:
   push:
     branches:
       - feature/spam-control-p0
-      - changeset/spam-control-semantic-architecture-v2
+      - changeset/spam-control-family-correction-semantics
       - audit/spam-control-observability-contract
     paths:
       - '.github/scripts/verify_spam_control_observability_contract.py'

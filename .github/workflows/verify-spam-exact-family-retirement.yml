@@ -17,6 +17,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamUndoManager.java'
+      - 'app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java'
   workflow_dispatch:
 
 permissions:

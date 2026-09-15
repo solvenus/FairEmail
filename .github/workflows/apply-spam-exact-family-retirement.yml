@@ -1,5 +1,5 @@
 name: Apply Spam exact-family retirement
-# Retriggered with shallow checkout; race safety does not require full history.
+# Shallow, race-safe atomic retirement ChangeSet.
 
 on:
   push:
@@ -128,7 +128,7 @@ jobs:
           echo '=== Reset/undo contract ==='
           python3 .github/scripts/verify_spam_control_reset_undo_contract.py
           echo '=== CI coverage contract ==='
-          python3 .github/scripts/verify_spam_control_ci_coverage.py
+          python3 .github/scripts/verify_spam_control_contract_coverage.py
           git diff --check
 
           echo '=== Scoped diff ==='
