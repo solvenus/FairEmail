@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 8,
+        version = 9,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
@@ -33,7 +33,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
                 EntitySpamIntent.class,
                 EntitySpamFamily.class,
                 EntitySpamFamilyExemplar.class,
-                EntitySpamRescoreTask.class
+                EntitySpamRescoreTask.class,
+                EntitySpamFamilyExclusion.class
         },
         exportSchema = true
 )
@@ -164,6 +165,25 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_8_9 = new Migration(8, 9) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("CREATE TABLE IF NOT EXISTS spam_family_exclusion (" +
+                    "account_uuid TEXT NOT NULL," +
+                    "message_id INTEGER NOT NULL," +
+                    "family_id INTEGER NOT NULL," +
+                    "created_at INTEGER NOT NULL," +
+                    "reason TEXT," +
+                    "PRIMARY KEY(account_uuid, message_id, family_id))");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_exclusion_family_id" +
+                    " ON spam_family_exclusion(family_id)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_exclusion_message_id" +
+                    " ON spam_family_exclusion(message_id)");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_spam_family_exclusion_created_at" +
+                    " ON spam_family_exclusion(created_at)");
+        }
+    };
+
     public abstract DaoAlias alias();
     public abstract DaoSpamFamily family();
 
@@ -181,7 +201,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 DB_NAME)
                         .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
                                 MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7,
-                                MIGRATION_7_8)
+                                MIGRATION_7_8, MIGRATION_8_9)
                         .build();
                 instance = current;
             }
