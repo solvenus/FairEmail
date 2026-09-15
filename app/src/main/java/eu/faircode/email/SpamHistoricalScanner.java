@@ -65,6 +65,9 @@ public final class SpamHistoricalScanner {
                 if (page == null || page.isEmpty())
                     break;
 
+                SpamControlLog.d(app, "SCAN",
+                        "< PAGE afterMessageId=" + afterMessageId + " rows=" + page.size());
+
                 for (EntityMessage message : page) {
                     if (message == null || message.id == null)
                         continue;
@@ -99,6 +102,11 @@ public final class SpamHistoricalScanner {
                         if (beforeMessage == null)
                             newlyIndexed++;
                     }
+                    SpamControlLog.t(app, "SCAN",
+                            "INDEX message=" + message.id +
+                                    " folder=" + folder.type +
+                                    " new=" + (beforeMessage == null) +
+                                    " envelope=" + (message.deliveredto == null ? "missing" : "present"));
 
                     if (message.deliveredto == null) {
                         missingEnvelope++;
