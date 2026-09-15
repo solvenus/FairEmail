@@ -1,0 +1,41 @@
+name: Apply Spam Control P0 Bulk
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_spam_control_p0_bulk.py'
+      - '.github/workflows/apply-spam-control-p0-bulk.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_spam_control_p0_bulk.py
+          git diff --check
+          git status --short
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/DaoAlias.java \
+                  app/src/main/java/eu/faircode/email/SpamLearningSnapshot.java \
+                  app/src/main/java/eu/faircode/email/SpamUndoManager.java \
+                  app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java \
+                  app/src/main/java/eu/faircode/email/SpamIntelligence.java \
+                  app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Add reversible exact-family bulk learning"
+          git push origin HEAD:feature/spam-control-p0
