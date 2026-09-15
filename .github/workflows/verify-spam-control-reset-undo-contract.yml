@@ -1,0 +1,25 @@
+name: Verify Spam Control reset and undo contract
+
+on:
+  push:
+    branches:
+      - audit/spam-control-reset-undo-contract
+    paths:
+      - '.github/scripts/verify_spam_control_reset_undo_contract.py'
+      - '.github/workflows/verify-spam-control-reset-undo-contract.yml'
+      - 'app/src/main/java/eu/faircode/email/SpamLearningSnapshot.java'
+      - 'app/src/main/java/eu/faircode/email/SpamUndoManager.java'
+      - 'app/src/main/java/eu/faircode/email/DaoSpamSnapshot.java'
+      - 'app/src/main/java/eu/faircode/email/DaoSpamMessage.java'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify reset and undo semantics
+        run: python3 .github/scripts/verify_spam_control_reset_undo_contract.py
