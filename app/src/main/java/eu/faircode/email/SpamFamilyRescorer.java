@@ -24,7 +24,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public final class SpamFamilyRescorer {
     private static final int PAGE_SIZE = 24;
     private static final long PAGE_DELAY_MS = 35L;
-    private static final double EPSILON = 1e-9;
 
     private static final ScheduledExecutorService executor =
             Executors.newSingleThreadScheduledExecutor(r -> {
@@ -143,21 +142,25 @@ public final class SpamFamilyRescorer {
                 if (candidate.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD)
                     matches++;
 
-                Long currentFamily = delivery.predicted_family_id;
-                double currentScore = delivery.family_score == null
-                        ? -1.0 : delivery.family_score;
-                boolean sameFamily = currentFamily != null &&
-                        currentFamily == task.family_id;
-
-                if (sameFamily && candidate.value + EPSILON < currentScore) {
-                    // Pruning/correction can weaken the current winner. In that
-                    // uncommon case recompute against all active families so a
-                    // different family can correctly take over.
-                    applyBestMatch(context, dao, task.account_uuid,
-                            delivery.message_id, fingerprint);
-                } else if (sameFamily || candidate.value > currentScore + EPSILON) {
-                    setMatch(dao, task.account_uuid, delivery.message_id,
-                            task.family_id, candidate, System.currentTimeMillis());
+                SpamFamilyPredictionPolicy.Action action = SpamFamilyPredictionPolicy.decide(
+                        delivery.predicted_family_id,
+                        delivery.family_score,
+                        task.family_id,
+                        candidate.value);
+                switch (action) {
+                    case RECOMPUTE_ALL:
+                        // Pruning/correction weakened the current winner. Let all
+                        // active families compete again for this one message.
+                        applyBestMatch(context, dao, task.account_uuid,
+                                delivery.message_id, fingerprint);
+                        break;
+                    case USE_CANDIDATE:
+                        setMatch(dao, task.account_uuid, delivery.message_id,
+                                task.family_id, candidate, System.currentTimeMillis());
+                        break;
+                    case KEEP_CURRENT:
+                    default:
+                        break;
                 }
             } catch (Throwable ex) {
                 // One damaged/missing historical message must not stop the scan.
