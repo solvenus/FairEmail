@@ -158,6 +158,7 @@ public final class SpamFamilyEngine {
 
     public static final class Score {
         static final Score ZERO = new Score(0, 0, 0, 0, 0, 0, 0);
+        private static final Score EXACT = new Score(1, 1, 1, 1, 1, 1, 1);
         public final double value, raw, evidence, text, structure, links, sender;
 
         private Score(double value, double raw, double evidence, double text,
@@ -169,6 +170,10 @@ public final class SpamFamilyEngine {
             this.structure = structure;
             this.links = links;
             this.sender = sender;
+        }
+
+        public static Score exact() {
+            return EXACT;
         }
 
         @Override
