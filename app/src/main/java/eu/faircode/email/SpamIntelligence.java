@@ -32,6 +32,10 @@ public final class SpamIntelligence {
             if (context == null)
                 return;
 
+            // Keep intent observation alive even when this entry point is the
+            // first spam-intelligence code touched in a process.
+            SpamIntentObserver.start(context);
+
             // Populate the registry from already-synced mail once per process.
             // This is background, restart-safe and idempotent.
             AliasBackfill.schedule(context);
@@ -55,6 +59,8 @@ public final class SpamIntelligence {
             if (context == null || account == null || folder == null || message == null ||
                     message.id == null || account.uuid == null || message.deliveredto == null)
                 return;
+
+            SpamIntentObserver.start(context);
 
             AliasDomainAffinity.Evidence evidence = AliasDomainAffinity.fromMessage(context, message);
             SpamAliasStore.observeDelivery(
