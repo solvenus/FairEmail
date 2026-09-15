@@ -206,6 +206,11 @@ public class ActivitySpamControl extends ActivityBase {
         svContent.post(() -> svContent.scrollTo(0, 0));
     }
 
+    private void openAliasBucket(int bucket) {
+        aliasBucketSelection = Math.max(0, Math.min(2, bucket));
+        setSection(Section.ALIASES);
+    }
+
     private void updateNav() {
         for (Map.Entry<Section, Button> entry : navButtons.entrySet()) {
             boolean active = entry.getKey() == section;
@@ -377,11 +382,11 @@ public class ActivitySpamControl extends ActivityBase {
                 needsDetail, actualNeeds == 0 ? null :
                         (reviewCount > 0 ? "Gjennomgå nå" : "Se aliaser"),
                 actualNeeds == 0 ? null :
-                        (reviewCount > 0 ? v -> setSection(Section.REVIEW) : v -> setSection(Section.ALIASES))),
+                        (reviewCount > 0 ? v -> setSection(Section.REVIEW) : v -> openAliasBucket(0))),
                 matchWrapWithMargin(0, 0, 0, 8));
         llPage.addView(statCard("Kompromitterte aliaser", String.valueOf(compromised),
-                replacementsMissing + " mangler replacement", "Se aliaser",
-                v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 8));
+                replacementsMissing + " uten replacement · anbefalt", "Se aliaser",
+                v -> openAliasBucket(0)), matchWrapWithMargin(0, 0, 0, 8));
         llPage.addView(statCard("Kjent spam", String.valueOf(spamHits),
                 families.size() + " spamidentiteter · " + smtpDead + " SMTP-døde aliaser", null, null),
                 matchWrapWithMargin(0, 0, 0, 12));
@@ -395,11 +400,11 @@ public class ActivitySpamControl extends ActivityBase {
             llPage.addView(attentionCard(attentionStats.compromiseDecisions +
                             " aliaser trenger kompromissavgjørelse",
                     "Spam finnes, men appen kan ikke avgjøre alias-lekkasjen uten deg.",
-                    "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+                    "Se aliaser", v -> openAliasBucket(0)), matchWrapWithMargin(0, 0, 0, 6));
         if (attentionStats.serverFailures > 0)
             llPage.addView(attentionCard(attentionStats.serverFailures + " SMTP-operasjoner feilet",
                     "Serverhandlingen trenger inspeksjon eller nytt forsøk.",
-                    "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+                    "Se aliaser", v -> openAliasBucket(0)), matchWrapWithMargin(0, 0, 0, 6));
         if (actualNeeds == 0) {
             TextView done = bodyText("✓ Ingen uløste beslutninger eller feil akkurat nå.");
             done.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
@@ -415,12 +420,12 @@ public class ActivitySpamControl extends ActivityBase {
                 llPage.addView(attentionCard(attentionStats.replacementMissingRecommendations +
                                 " kompromitterte aliaser mangler replacement",
                         "Anbefalt før SMTP-burn. Dette sperrer deg ikke.",
-                        "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 6, 0, 6));
+                        "Se aliaser", v -> openAliasBucket(0)), matchWrapWithMargin(0, 6, 0, 6));
             if (attentionStats.replacementUnverifiedRecommendations > 0)
                 llPage.addView(attentionCard(attentionStats.replacementUnverifiedRecommendations +
                                 " replacements kan verifiseres",
                         "Verifisering gir mer sikkerhet, men er ikke nødvendig for burn.",
-                        "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+                        "Se aliaser", v -> openAliasBucket(0)), matchWrapWithMargin(0, 0, 0, 6));
             if (!SpamControlPolicy.hasCpanelConfig(this))
                 llPage.addView(attentionCard("cPanel er ikke konfigurert",
                         "Konfigurer dette når du vil bruke server-side SMTP hard reject.",
