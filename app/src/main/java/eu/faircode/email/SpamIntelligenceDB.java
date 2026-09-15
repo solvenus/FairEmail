@@ -210,6 +210,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
     public abstract DaoAlias alias();
     public abstract DaoSpamFamily family();
     public abstract DaoSpamActionHistory actions();
+    public abstract DaoSpamSnapshot snapshot();
 
     public static SpamIntelligenceDB getInstance(Context context) {
         SpamIntelligenceDB current = instance;
