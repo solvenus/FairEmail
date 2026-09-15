@@ -121,6 +121,26 @@ public interface DaoSpamFamily {
             " AND label = " + EntityAliasDelivery.LABEL_SPAM)
     int countConfirmedMembers(long familyId);
 
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    long insertExclusion(EntitySpamFamilyExclusion exclusion);
+
+    @Query("DELETE FROM spam_family_exclusion" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId" +
+            " AND family_id = :familyId")
+    int deleteExclusion(String accountUuid, long messageId, long familyId);
+
+    @Query("SELECT family_id FROM spam_family_exclusion" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    List<Long> getExcludedFamilyIds(String accountUuid, long messageId);
+
+    @Query("SELECT COUNT(*) FROM spam_family_exclusion" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId" +
+            " AND family_id = :familyId")
+    int countExclusion(String accountUuid, long messageId, long familyId);
+
+    @Query("DELETE FROM spam_family_exclusion WHERE family_id = :familyId")
+    int deleteExclusionsForFamily(long familyId);
+
     @Query("UPDATE alias_delivery SET" +
             " predicted_family_id = :familyId," +
             " family_score = :score," +
