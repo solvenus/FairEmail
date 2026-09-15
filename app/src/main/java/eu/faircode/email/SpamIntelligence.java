@@ -29,8 +29,15 @@ public final class SpamIntelligence {
                                       EntityFolder folder,
                                       EntityMessage message) {
         try {
-            if (context == null || folder == null || message == null ||
-                    message.account == null || message.deliveredto == null)
+            if (context == null)
+                return;
+
+            // Populate the registry from already-synced mail once per process.
+            // This is background, restart-safe and idempotent.
+            AliasBackfill.schedule(context);
+
+            if (folder == null || message == null || message.account == null ||
+                    message.deliveredto == null)
                 return;
             EntityAccount account = DB.getInstance(context).account().getAccount(message.account);
             observeMessage(context, account, folder, message);
@@ -60,17 +67,9 @@ public final class SpamIntelligence {
                     evidence.senderDomain,
                     evidence.unsubscribe);
 
-            // Evaluate only. Automatic move/delete remains disabled until replay
-            // has established precision on real user data.
-            AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(context, account, message);
-            if (traffic.alias != null)
-                Log.i("AliasTraffic" +
-                        " alias=" + traffic.alias +
-                        " sender=" + traffic.senderDomain +
-                        " service=" + traffic.serviceDomain +
-                        " aliasLabels=" + traffic.aliasSpam + "/" + traffic.aliasHam +
-                        " senderLabels=" + traffic.senderSpam + "/" + traffic.senderHam +
-                        " " + traffic.assessment);
+            // Evaluate and persist only. Automatic move/delete remains disabled
+            // until replay has established precision on real user data.
+            refreshAssessment(context, account, message, true);
 
             // Reuse FairEmail's existing sender_extra mechanism, but constrain it
             // to exact active aliases already observed in our registry.
@@ -190,15 +189,46 @@ public final class SpamIntelligence {
                     message.id == null || account.uuid == null)
                 return;
 
-            SpamAliasStore.setLabel(
+            // Label actions can arrive before a message has passed the normal
+            // intelligence ingress. Ensure a ledger row exists first.
+            EntityAliasDelivery delivery = SpamIntelligenceDB.getInstance(context)
+                    .alias().getDelivery(account.uuid, message.id);
+            if (delivery == null && message.folder != null && message.deliveredto != null) {
+                EntityFolder folder = DB.getInstance(context).folder().getFolder(message.folder);
+                if (folder != null)
+                    observeMessage(context, account, folder, message);
+            }
+
+            boolean changed = SpamAliasStore.setLabel(
                     context,
                     account.uuid,
                     message.id,
                     label,
                     familyId);
+            if (changed)
+                refreshAssessment(context, account, message, false);
         } catch (Throwable ex) {
             Log.e(ex);
         }
+    }
+
+    private static void refreshAssessment(Context context,
+                                          EntityAccount account,
+                                          EntityMessage message,
+                                          boolean log) {
+        AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(context, account, message);
+        if (traffic.alias == null || message.id == null || account.uuid == null)
+            return;
+
+        SpamAliasStore.setAssessment(context, account.uuid, message.id, traffic.assessment);
+        if (log)
+            Log.i("AliasTraffic" +
+                    " alias=" + traffic.alias +
+                    " sender=" + traffic.senderDomain +
+                    " service=" + traffic.serviceDomain +
+                    " aliasLabels=" + traffic.aliasSpam + "/" + traffic.aliasHam +
+                    " senderLabels=" + traffic.senderSpam + "/" + traffic.senderHam +
+                    " " + traffic.assessment);
     }
 
     private static String emailDomain(String address) {
