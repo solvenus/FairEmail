@@ -63,6 +63,7 @@ import javax.mail.internet.InternetAddress;
  */
 public class ActivitySpamControl extends ActivityBase {
     private static final int REVIEW_LIMIT = 250;
+    private static final int FAMILY_MESSAGE_LIMIT = 100;
     private static final ExecutorService executor =
             Helper.getBackgroundExecutor(1, "spam-control-dashboard");
 
@@ -1251,9 +1252,13 @@ public class ActivitySpamControl extends ActivityBase {
         body.addView(bodyText(family.confirmed_count + " bekreftet · " +
                 family.strong_unknown_count + " eksakte nye treff"), matchWrapWithMargin(0, 5, 0, 0));
 
+        Button messages = primaryButton("Se meldinger");
+        messages.setOnClickListener(v -> showFamilyMessages(family));
+        body.addView(messages, matchWrapWithMargin(0, 8, 0, 0));
+
         LinearLayout actions = new LinearLayout(this);
         actions.setOrientation(LinearLayout.HORIZONTAL);
-        actions.setPadding(0, dp(8), 0, 0);
+        actions.setPadding(0, dp(5), 0, 0);
         Button rename = secondaryButton("Gi navn");
         rename.setOnClickListener(v -> showRenameDialog(family));
         actions.addView(rename, weightedButton());
@@ -1266,6 +1271,105 @@ public class ActivitySpamControl extends ActivityBase {
         });
         actions.addView(rescore, weightedButton());
         body.addView(actions, matchWrap());
+        card.addView(body, matchWrap());
+        return card;
+    }
+
+    private void showFamilyMessages(TupleSpamFamilyOverview family) {
+        EntityAccount account = selectedAccount;
+        if (account == null || account.uuid == null || family == null)
+            return;
+
+        tvStatus.setText("Laster meldinger i " + familyLabel(family.family_id) + " …");
+        executor.execute(() -> {
+            List<SpamFamilyLabRepository.Candidate> candidates;
+            try {
+                candidates = SpamFamilyLabRepository.getCandidates(
+                        getApplicationContext(), account.uuid, family.family_id,
+                        FAMILY_MESSAGE_LIMIT);
+            } catch (Throwable ex) {
+                Log.e(ex);
+                candidates = Collections.emptyList();
+            }
+            final List<SpamFamilyLabRepository.Candidate> result = candidates;
+            runOnUiThread(() -> {
+                if (isFinishing() || isDestroyed() || !isSelected(account))
+                    return;
+                tvStatus.setText(result.size() +
+                        (result.size() == 1 ? " melding" : " meldinger") +
+                        " vist i " + familyLabel(family.family_id));
+                showFamilyMessagesDialog(family, result);
+            });
+        });
+    }
+
+    private void showFamilyMessagesDialog(TupleSpamFamilyOverview family,
+                                          List<SpamFamilyLabRepository.Candidate> candidates) {
+        LinearLayout content = dialogForm();
+        content.addView(bodyText(candidates.size() +
+                (candidates.size() == 1 ? " melding" : " meldinger") +
+                " · viser opptil " + FAMILY_MESSAGE_LIMIT +
+                " · read-only"), matchWrapWithMargin(0, 0, 0, 8));
+
+        if (candidates.isEmpty())
+            content.addView(bodyText("Ingen lokale meldinger er tilgjengelige i denne spamgruppen."),
+                    matchWrap());
+        else
+            for (SpamFamilyLabRepository.Candidate candidate : candidates)
+                content.addView(familyMessageInspectionCard(candidate),
+                        matchWrapWithMargin(0, 0, 0, 8));
+
+        ScrollView scroll = new ScrollView(this);
+        scroll.setFillViewport(false);
+        scroll.addView(content, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+
+        new AlertDialog.Builder(this)
+                .setTitle("Meldinger · " + familyLabel(family.family_id))
+                .setView(scroll)
+                .setPositiveButton("Lukk", null)
+                .show();
+    }
+
+    private View familyMessageInspectionCard(SpamFamilyLabRepository.Candidate candidate) {
+        CardView card = card(8, 1);
+        LinearLayout body = cardBody(11, 10);
+
+        TextView state = bodyText(reviewState(candidate));
+        state.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+        body.addView(state, matchWrap());
+
+        body.addView(fieldLabel("EMNE"), matchWrapWithMargin(0, 8, 0, 0));
+        body.addView(valueText(empty(candidate.subject, "(uten emne)"), 17f, true), matchWrap());
+
+        SenderParts sender = senderParts(candidate.sender);
+        body.addView(fieldLabel("AVSENDERNAVN"), matchWrapWithMargin(0, 7, 0, 0));
+        body.addView(valueText(empty(sender.name, "(uten navn)"), 15f, true), matchWrap());
+
+        body.addView(fieldLabel("AVSENDERADRESSE"), matchWrapWithMargin(0, 7, 0, 0));
+        TextView address = valueText(empty(sender.address,
+                candidate.senderDomain == null ? "(ukjent)" : candidate.senderDomain), 14f, false);
+        address.setTypeface(Typeface.MONOSPACE);
+        address.setTextIsSelectable(true);
+        body.addView(address, matchWrap());
+
+        body.addView(fieldLabel("MOTTATT PÅ ALIAS"), matchWrapWithMargin(0, 7, 0, 0));
+        TextView alias = valueText(empty(candidate.alias, "(ukjent alias)"), 14f, true);
+        alias.setTypeface(Typeface.MONOSPACE, Typeface.BOLD);
+        alias.setTextIsSelectable(true);
+        body.addView(alias, matchWrap());
+
+        if (!candidate.messagePresent) {
+            TextView missing = bodyText("Meldingen finnes ikke lenger lokalt; Spamkontroll viser beholdt observasjon.");
+            missing.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            body.addView(missing, matchWrapWithMargin(0, 7, 0, 0));
+        }
+
+        body.addView(bodyText(DateUtils.getRelativeDateTimeString(
+                this, candidate.received, DateUtils.MINUTE_IN_MILLIS,
+                DateUtils.WEEK_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE).toString()),
+                matchWrapWithMargin(0, 7, 0, 0));
+
         card.addView(body, matchWrap());
         return card;
     }
