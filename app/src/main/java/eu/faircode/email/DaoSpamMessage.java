@@ -64,7 +64,11 @@ public interface DaoSpamMessage {
             " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntitySpamMessage.LABEL_UNKNOWN + ")" +
             " AND (folder_type = '" + EntityFolder.JUNK + "'" +
-            "   OR predicted_family_id IS NOT NULL)" +
+            "   OR predicted_family_id IS NOT NULL" +
+            "   OR EXISTS (SELECT 1 FROM alias_delivery d" +
+            "       WHERE d.account_uuid = spam_message.account_uuid" +
+            "       AND d.message_id = spam_message.message_id" +
+            "       AND d.traffic_verdict = 'SUSPICIOUS'))" +
             " ORDER BY" +
             " CASE WHEN label = " + EntitySpamMessage.LABEL_UNKNOWN + " THEN 0 ELSE 1 END," +
             " CASE WHEN folder_type = '" + EntityFolder.JUNK + "' THEN 0 ELSE 1 END," +
@@ -76,7 +80,11 @@ public interface DaoSpamMessage {
             " WHERE account_uuid = :accountUuid" +
             " AND (:includeReviewed OR label = " + EntitySpamMessage.LABEL_UNKNOWN + ")" +
             " AND (folder_type = '" + EntityFolder.JUNK + "'" +
-            "   OR predicted_family_id IS NOT NULL)")
+            "   OR predicted_family_id IS NOT NULL" +
+            "   OR EXISTS (SELECT 1 FROM alias_delivery d" +
+            "       WHERE d.account_uuid = spam_message.account_uuid" +
+            "       AND d.message_id = spam_message.message_id" +
+            "       AND d.traffic_verdict = 'SUSPICIOUS'))")
     int countReviewQueue(String accountUuid, boolean includeReviewed);
 
     @Query("SELECT * FROM spam_message" +
