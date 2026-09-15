@@ -2,7 +2,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application>
         <activity
-            android:name=".ActivitySpamFamilyLab"
+            android:name=".ActivitySpamControl"
             android:exported="true"
             android:label="Spamkontroll"
             android:launchMode="singleTask"
@@ -12,5 +12,13 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Kept as a non-launcher fallback while the new dashboard is exercised. -->
+        <activity
+            android:name=".ActivitySpamFamilyLab"
+            android:exported="false"
+            android:label="Spamkontroll Lab"
+            android:launchMode="singleTask"
+            android:resizeableActivity="true" />
     </application>
 </manifest>
