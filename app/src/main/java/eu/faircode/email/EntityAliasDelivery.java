@@ -28,6 +28,7 @@ import androidx.room.Index;
                 @Index(value = {"received"}),
                 @Index(value = {"label"}),
                 @Index(value = {"family_id"}),
+                @Index(value = {"predicted_family_id"}),
                 @Index(value = {"sender_domain"}),
                 @Index(value = {"traffic_verdict"})
         }
@@ -61,8 +62,18 @@ public class EntityAliasDelivery {
     /** User/classifier label; independent of current physical folder. */
     public int label = LABEL_UNKNOWN;
 
-    /** Learned spam-family id, when a family match/label exists. */
+    /** Confirmed learned spam-family id for explicit spam labels. */
     public Long family_id;
+
+    /** Observer-only nearest learned family. This is evidence, not a label. */
+    public Long predicted_family_id;
+    public Double family_score;
+    public Double family_score_raw;
+    public Double family_text;
+    public Double family_structure;
+    public Double family_links;
+    public Double family_sender;
+    public Long family_assessed_at;
 
     /** Snapshot of the explainable alias/domain assessment at assessment time. */
     public Double spam_support;
