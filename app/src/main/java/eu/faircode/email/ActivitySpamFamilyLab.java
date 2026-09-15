@@ -151,8 +151,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
 
         body.addView(sectionTitle("Spamgrupper"), matchWrap());
         TextView groupHelp = bodyText(
-                "En spamgruppe er en samling meldinger som ser ut til å komme fra samme spamkampanje. " +
-                        "Velg en gruppe for å kontrollere treffene.");
+                "Velg en spamgruppe for å se meldingene som systemet mener hører sammen.");
         groupHelp.setPadding(0, dp(2), 0, dp(8));
         body.addView(groupHelp, matchWrap());
 
@@ -189,16 +188,15 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         LinearLayout content = cardBody(14, 12);
 
         TextView title = new TextView(this);
-        title.setText("Slik bruker du Spamkontroll");
+        title.setText("Hva skal jeg se på?");
         title.setTextSize(18f);
         title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         content.addView(title, matchWrap());
 
         TextView text = bodyText(
-                "1. Velg en spamgruppe.\n" +
-                        "2. Se på emne, avsender og alias.\n" +
-                        "3. Trykk Samme spam, Annen spam eller Ikke spam.\n\n" +
-                        "Filteret lærer av valgene dine. Denne skjermen sletter ikke e-post og brenner ikke alias.");
+                "EMNE · AVSENDERNAVN · AVSENDERADRESSE · ALIAS\n\n" +
+                        "Dette er hovedsignalene. Velg deretter Samme spam, Annen spam eller Ikke spam. " +
+                        "Alle valg kan angres.");
         text.setPadding(0, dp(6), 0, 0);
         content.addView(text, matchWrap());
         card.addView(content, matchWrap());
@@ -612,14 +610,6 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         aliasCard.addView(aliasBody, matchWrap());
         content.addView(aliasCard, matchWrapWithMargin(0, 12, 0, 0));
 
-        if (candidate.preview != null && !candidate.preview.trim().isEmpty()) {
-            TextView preview = bodyText(candidate.preview.trim());
-            preview.setMaxLines(3);
-            preview.setEllipsize(TextUtils.TruncateAt.END);
-            preview.setPadding(0, dp(10), 0, 0);
-            content.addView(preview, matchWrap());
-        }
-
         TextView when = bodyText(DateUtils.getRelativeDateTimeString(
                 this,
                 candidate.received,
@@ -630,7 +620,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         when.setPadding(0, dp(7), 0, 0);
         content.addView(when, matchWrap());
 
-        Button details = secondaryButton("Tekniske detaljer");
+        Button details = secondaryButton("Detaljer");
         details.setOnClickListener(v -> showTechnicalDetails(group, candidate));
         content.addView(details, wrapWrapWithMargin(0, 8, 0, 0));
 
@@ -642,10 +632,10 @@ public class ActivitySpamFamilyLab extends ActivityBase {
             content.addView(unavailable, matchWrap());
         } else {
             LinearLayout actions = new LinearLayout(this);
-            actions.setOrientation(LinearLayout.HORIZONTAL);
-            actions.setPadding(0, dp(12), 0, 0);
+            actions.setOrientation(LinearLayout.VERTICAL);
+            actions.setPadding(0, dp(14), 0, 0);
 
-            Button same = actionButton(candidate.confirmedThisFamily ? "Samme spam ✓" : "Samme spam");
+            Button same = primaryActionButton(candidate.confirmedThisFamily ? "Samme spam ✓" : "Samme spam");
             same.setEnabled(!candidate.confirmedThisFamily);
             same.setOnClickListener(v -> runCandidateAction(
                     account, group, candidate,
@@ -658,7 +648,11 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                             () -> SpamFamilyLabRepository.confirmSpam(
                                     getApplicationContext(), account.uuid,
                                     group.family_id, candidate.messageId))));
-            actions.addView(same, weightedButton());
+            actions.addView(same, matchWrap());
+
+            LinearLayout secondaryActions = new LinearLayout(this);
+            secondaryActions.setOrientation(LinearLayout.HORIZONTAL);
+            secondaryActions.setPadding(0, dp(6), 0, 0);
 
             Button other = actionButton("Annen spam");
             other.setOnClickListener(v -> runCandidateAction(
@@ -672,7 +666,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                             () -> SpamFamilyLabRepository.markOtherSpam(
                                     getApplicationContext(), account.uuid,
                                     group.family_id, candidate.messageId))));
-            actions.addView(other, weightedButton());
+            secondaryActions.addView(other, weightedButton());
 
             Button legitimate = actionButton(candidate.explicitHam ? "Ikke spam ✓" : "Ikke spam");
             legitimate.setEnabled(!candidate.explicitHam);
@@ -686,8 +680,9 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                             SpamUndoManager.ACTION_NOT_SPAM, "Ikke spam",
                             () -> SpamFamilyLabRepository.markLegitimate(
                                     getApplicationContext(), account.uuid, candidate.messageId))));
-            actions.addView(legitimate, weightedButton());
+            secondaryActions.addView(legitimate, weightedButton());
 
+            actions.addView(secondaryActions, matchWrap());
             content.addView(actions, matchWrap());
         }
 
@@ -750,7 +745,9 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 .append("Struktur: ").append(percent(candidate.structure)).append('\n')
                 .append("Lenker: ").append(percent(candidate.links)).append('\n')
                 .append("Avsender: ").append(percent(candidate.senderScore)).append('\n')
-                .append("Unsubscribe: ").append(candidate.hasUnsubscribe ? "ja" : "nei");
+                .append("Unsubscribe: ").append(candidate.hasUnsubscribe ? "ja" : "nei")
+                .append("\n\nForhåndsvisning:\n")
+                .append(empty(candidate.preview, "(ingen)"));
 
         new AlertDialog.Builder(this)
                 .setTitle("Tekniske detaljer")
@@ -917,6 +914,14 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         button.setText(text);
         button.setAllCaps(false);
         button.setMinHeight(dp(48));
+        return button;
+    }
+
+    private Button primaryActionButton(String text) {
+        Button button = actionButton(text);
+        button.setMinHeight(dp(56));
+        button.setTextSize(16f);
+        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         return button;
     }
 
