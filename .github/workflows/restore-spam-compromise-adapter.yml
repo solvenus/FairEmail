@@ -1,0 +1,64 @@
+name: Restore Spam compromise adapter contract
+
+on:
+  push:
+    branches:
+      - repair/spam-control-preserve-compromise-contract
+    paths:
+      - '.github/scripts/restore_spam_compromise_adapter.py'
+      - '.github/workflows/restore-spam-compromise-adapter.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  SPAM_FAMILIES_DEBUG_CERT_SHA256: 'CC:76:B0:A6:00:8D:13:29:B4:2E:02:80:69:80:EB:35:53:29:25:25:89:DC:A5:F8:44:81:63:4E:36:1C:48:C0'
+  SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256: 'a5b8dec7dfb22b8724291eea1f54771102873c454eb9d2f56049a86918bb2802'
+
+jobs:
+  repair-and-verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+      - name: Install pinned debug signing key
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/keys/spam-families-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          printf '%s  %s\n' "$SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256" "$HOME/.android/debug.keystore" | sha256sum -c -
+      - name: Restore known compromise adapter contract
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/restore_spam_compromise_adapter.py
+          git diff --check
+      - name: Verify adapter source invariants
+        run: |
+          set -euo pipefail
+          FILE=app/src/main/java/eu/faircode/email/SpamIntelligence.java
+          grep -q 'input.trafficSuspicious' "$FILE"
+          grep -q 'traffic.serviceDomain' "$FILE"
+          grep -q 'traffic.trustedDomains' "$FILE"
+          grep -q 'input.aliasHam = traffic.aliasHam' "$FILE"
+          ! grep -q 'AliasDomainAffinity.isTrustedSender' "$FILE"
+      - name: Compile Java and Room before commit
+        run: ./gradlew :app:compileGithubDebugJavaWithJavac --stacktrace --no-daemon
+      - name: Verify DB 8 to 11 migrations
+        run: python3 .github/scripts/verify_spam_intelligence_migration.py
+      - name: Commit only verified source repair
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add app/src/main/java/eu/faircode/email/SpamIntelligence.java
+          git diff --cached --quiet && exit 0
+          git commit -m 'Restore Spam alias compromise adapter contract'
+          git push origin HEAD:repair/spam-control-preserve-compromise-contract
