@@ -1,0 +1,52 @@
+name: Diagnose Spam message consumer patch
+
+on:
+  push:
+    branches: [feature/spam-control-p0]
+    paths: ['.github/workflows/diagnose-spam-message-consumers.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: feature/spam-control-p0
+    steps:
+      - name: Run patcher dry and persist exact diagnostic
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64,json,os,pathlib,subprocess,tempfile,urllib.parse,urllib.request,urllib.error
+          repo=os.environ['REPO']; branch=os.environ['BRANCH']; token=os.environ['GH_TOKEN']
+          files=['app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java','app/src/main/java/eu/faircode/email/SpamControlQueueStats.java','app/src/main/java/eu/faircode/email/DaoSpamMessage.java','app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java','app/src/main/java/eu/faircode/email/SpamFamilyRescorer.java','app/src/main/java/eu/faircode/email/DaoSpamFamily.java']
+          script='.github/scripts/patch_spam_message_consumers.py'; diag='.github/diagnostics/spam-message-consumers.txt'
+          h={'Authorization':f'Bearer {token}','Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'spam-patch-diagnostic'}
+          def get(p):
+              u=f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(p)}?ref={urllib.parse.quote(branch)}'
+              with urllib.request.urlopen(urllib.request.Request(u,headers=h)) as r:return json.loads(r.read().decode())
+          def maybe(p):
+              try:return get(p)
+              except urllib.error.HTTPError as e:
+                  if e.code==404:return None
+                  raise
+          def put(p,sha,text):
+              u=f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(p)}'
+              body={'message':'Record Spam consumer patch diagnostic','content':base64.b64encode(text.encode()).decode(),'branch':branch}
+              if sha:body['sha']=sha
+              with urllib.request.urlopen(urllib.request.Request(u,data=json.dumps(body).encode(),method='PUT',headers=h)) as r:return json.loads(r.read().decode())
+          objs={p:get(p) for p in files}; sobj=get(script)
+          with tempfile.TemporaryDirectory() as td:
+              root=pathlib.Path(td)
+              for p,o in objs.items():
+                  q=root/p;q.parent.mkdir(parents=True,exist_ok=True);q.write_text(base64.b64decode(o['content']).decode())
+              q=root/script;q.parent.mkdir(parents=True,exist_ok=True);q.write_text(base64.b64decode(sobj['content']).decode())
+              proc=subprocess.run(['python3',str(q)],cwd=root,text=True,capture_output=True)
+              report=f'returncode={proc.returncode}\nSTDOUT:\n{proc.stdout}\nSTDERR:\n{proc.stderr}\n'
+          old=maybe(diag); put(diag,None if old is None else old['sha'],report)
+          print(report)
+          PY
