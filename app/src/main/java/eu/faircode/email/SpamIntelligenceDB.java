@@ -11,9 +11,12 @@ package eu.faircode.email;
 
 import android.content.Context;
 
+import androidx.annotation.NonNull;
 import androidx.room.Database;
 import androidx.room.Room;
 import androidx.room.RoomDatabase;
+import androidx.room.migration.Migration;
+import androidx.sqlite.db.SupportSQLiteDatabase;
 
 /**
  * Isolated local database owned by the custom spam/alias intelligence layer.
@@ -22,7 +25,7 @@ import androidx.room.RoomDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 1,
+        version = 2,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
@@ -34,6 +37,20 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
     static final String DB_NAME = "spam-intelligence";
 
     private static volatile SpamIntelligenceDB instance;
+
+    private static final Migration MIGRATION_1_2 = new Migration(1, 2) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE alias ADD COLUMN service_domain TEXT");
+            db.execSQL("ALTER TABLE alias ADD COLUMN observed_domains TEXT NOT NULL DEFAULT '{}'");
+            db.execSQL("ALTER TABLE alias ADD COLUMN trusted_domains TEXT NOT NULL DEFAULT '[]'");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_alias_service_domain ON alias(service_domain)");
+
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN sender_domain TEXT");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN has_unsubscribe INTEGER NOT NULL DEFAULT 0");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_alias_delivery_sender_domain ON alias_delivery(sender_domain)");
+        }
+    };
 
     public abstract DaoAlias alias();
 
@@ -49,6 +66,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 context.getApplicationContext(),
                                 SpamIntelligenceDB.class,
                                 DB_NAME)
+                        .addMigrations(MIGRATION_1_2)
                         .build();
                 instance = current;
             }
