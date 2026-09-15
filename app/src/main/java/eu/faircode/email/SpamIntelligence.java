@@ -59,6 +59,10 @@ public final class SpamIntelligence {
                     folder.type,
                     evidence.senderDomain,
                     evidence.unsubscribe);
+
+            // Reuse FairEmail's existing sender_extra mechanism, but constrain it
+            // to exact aliases already observed in our registry.
+            AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
             // Intelligence must never be able to break mail synchronization.
             Log.e(ex);
