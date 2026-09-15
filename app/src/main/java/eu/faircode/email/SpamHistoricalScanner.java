@@ -3,7 +3,6 @@ package eu.faircode.email;
 import android.content.Context;
 
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,9 +10,11 @@ import java.util.Map;
 /**
  * Idempotent historical importer for Spam Control.
  *
- * It observes retained FairEmail messages from Inbox and/or Junk exactly as if
- * they had arrived today. Folder location is evidence/context, never automatic
- * spam/ham truth. Existing human labels are therefore preserved.
+ * Every retained Inbox/Junk message is indexed at message level. Envelope-To
+ * enriches alias intelligence when available, but is never required for the
+ * message to exist in Spam Control.
+ *
+ * Folder location is evidence/context, never automatic spam/ham truth.
  */
 public final class SpamHistoricalScanner {
     private static final int PAGE_SIZE = 250;
@@ -34,6 +35,7 @@ public final class SpamHistoricalScanner {
         DB mail = DB.getInstance(app);
         SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(app);
         DaoAlias aliasDao = intelligence.alias();
+        DaoSpamMessage messageDao = intelligence.message();
 
         List<String> folderTypes = new ArrayList<>();
         if (includeInbox)
@@ -43,11 +45,13 @@ public final class SpamHistoricalScanner {
 
         long afterMessageId = 0L;
         int examined = 0;
-        int observed = 0;
-        int newlyImported = 0;
+        int indexed = 0;
+        int newlyIndexed = 0;
+        int aliasObserved = 0;
+        int newlyImportedAlias = 0;
         int inbox = 0;
         int junk = 0;
-        int skippedNoEnvelope = 0;
+        int missingEnvelope = 0;
         int missingFolder = 0;
         Map<Long, EntityFolder> folderCache = new HashMap<>();
 
@@ -86,18 +90,29 @@ public final class SpamHistoricalScanner {
                     else if (EntityFolder.JUNK.equals(folder.type))
                         junk++;
 
+                    EntitySpamMessage beforeMessage = messageDao.get(account.uuid, message.id);
+                    SpamMessageStore.observe(app, account.uuid, message.id,
+                            message.received, folder.type, message.deliveredto);
+                    EntitySpamMessage afterMessage = messageDao.get(account.uuid, message.id);
+                    if (afterMessage != null) {
+                        indexed++;
+                        if (beforeMessage == null)
+                            newlyIndexed++;
+                    }
+
                     if (message.deliveredto == null) {
-                        skippedNoEnvelope++;
+                        missingEnvelope++;
+                        SpamIntelligence.refreshMessageFamilyState(app, account, message, false);
                         continue;
                     }
 
-                    EntityAliasDelivery before = aliasDao.getDelivery(account.uuid, message.id);
+                    EntityAliasDelivery beforeAlias = aliasDao.getDelivery(account.uuid, message.id);
                     SpamIntelligence.observeMessage(app, account, folder, message);
-                    EntityAliasDelivery after = aliasDao.getDelivery(account.uuid, message.id);
-                    if (after != null) {
-                        observed++;
-                        if (before == null)
-                            newlyImported++;
+                    EntityAliasDelivery afterAlias = aliasDao.getDelivery(account.uuid, message.id);
+                    if (afterAlias != null) {
+                        aliasObserved++;
+                        if (beforeAlias == null)
+                            newlyImportedAlias++;
                     }
                 }
 
@@ -105,30 +120,38 @@ public final class SpamHistoricalScanner {
                     break;
             }
 
-            // Re-evaluate retained observations after the whole history is present,
-            // because alias/domain evidence gets stronger as the scan progresses.
+            // Re-evaluate retained messages after the whole history is indexed.
             SpamFamilyRescorer.enqueueAllActive(app, account.uuid);
             SpamFamilyRescorer.start(app);
 
-            Result result = new Result(true, null, examined, observed, newlyImported,
-                    inbox, junk, skippedNoEnvelope, missingFolder);
+            Result result = new Result(true, null, examined,
+                    indexed, newlyIndexed, aliasObserved, newlyImportedAlias,
+                    inbox, junk, missingEnvelope, missingFolder);
             SpamControlLog.i(app, "SCAN",
-                    "DONE examined=" + examined + " observed=" + observed +
-                            " new=" + newlyImported + " existing=" + Math.max(0, observed - newlyImported) +
+                    "DONE examined=" + examined +
+                            " messageIndexed=" + indexed +
+                            " messageNew=" + newlyIndexed +
+                            " aliasObserved=" + aliasObserved +
+                            " aliasNew=" + newlyImportedAlias +
                             " inbox=" + inbox + " junk=" + junk +
-                            " noEnvelope=" + skippedNoEnvelope +
+                            " noEnvelope=" + missingEnvelope +
                             " missingFolder=" + missingFolder);
             return result;
         } catch (Throwable ex) {
             Log.e(ex);
             SpamControlLog.e(app, "SCAN",
-                    "FAILED examined=" + examined + " observed=" + observed +
-                            " new=" + newlyImported + " inbox=" + inbox + " junk=" + junk +
-                            " noEnvelope=" + skippedNoEnvelope +
+                    "FAILED examined=" + examined +
+                            " messageIndexed=" + indexed +
+                            " messageNew=" + newlyIndexed +
+                            " aliasObserved=" + aliasObserved +
+                            " aliasNew=" + newlyImportedAlias +
+                            " inbox=" + inbox + " junk=" + junk +
+                            " noEnvelope=" + missingEnvelope +
                             " missingFolder=" + missingFolder, ex);
             return new Result(false, ex.getClass().getSimpleName() + ": " +
-                    String.valueOf(ex.getMessage()), examined, observed,
-                    newlyImported, inbox, junk, skippedNoEnvelope, missingFolder);
+                    String.valueOf(ex.getMessage()), examined,
+                    indexed, newlyIndexed, aliasObserved, newlyImportedAlias,
+                    inbox, junk, missingEnvelope, missingFolder);
         }
     }
 
@@ -136,6 +159,10 @@ public final class SpamHistoricalScanner {
         public final boolean success;
         public final String error;
         public final int examined;
+        /** Messages present in canonical spam_message after scan. */
+        public final int indexed;
+        public final int newlyIndexed;
+        /** Alias-enriched messages, for backwards-compatible UI/reporting. */
         public final int observed;
         public final int newlyImported;
         public final int inbox;
@@ -143,12 +170,16 @@ public final class SpamHistoricalScanner {
         public final int skippedNoEnvelope;
         public final int missingFolder;
 
-        Result(boolean success, String error, int examined, int observed,
-               int newlyImported, int inbox, int junk,
+        Result(boolean success, String error, int examined,
+               int indexed, int newlyIndexed,
+               int observed, int newlyImported,
+               int inbox, int junk,
                int skippedNoEnvelope, int missingFolder) {
             this.success = success;
             this.error = error;
             this.examined = examined;
+            this.indexed = indexed;
+            this.newlyIndexed = newlyIndexed;
             this.observed = observed;
             this.newlyImported = newlyImported;
             this.inbox = inbox;
@@ -158,7 +189,7 @@ public final class SpamHistoricalScanner {
         }
 
         static Result error(String error) {
-            return new Result(false, error, 0, 0, 0, 0, 0, 0, 0);
+            return new Result(false, error, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
     }
 }
