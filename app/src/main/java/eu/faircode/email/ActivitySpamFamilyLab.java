@@ -133,7 +133,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
         });
         historyRow.addView(undo, weightedButton());
 
-        Button reset = secondaryButton("Nullstill læring");
+        Button reset = secondaryButton("Nullstill all læring");
         reset.setOnClickListener(v -> {
             EntityAccount account = selectedAccount;
             if (account != null)
@@ -232,10 +232,12 @@ public class ActivitySpamFamilyLab extends ActivityBase {
     private void showResetDialog(EntityAccount account) {
         new AlertDialog.Builder(this)
                 .setTitle("Nullstill all læring?")
-                .setMessage("Dette sletter spam/ikke-spam-valgene dine, spamgruppene, " +
-                        "modelltreffene og lærte spam-tellere for denne kontoen.\n\n" +
-                        "E-postene dine, aliasadressene, manuelle alias-domener, replacement-status " +
-                        "og SMTP/cPanel-regler blir ikke rørt. Undo-historikken slettes også.")
+                .setMessage("Dette nullstiller all spamlæring i Spamkontroll på alle e-postkontoene " +
+                        "i denne testappen. Spam/ikke-spam-valg, spamgrupper, modelltreff og lærte " +
+                        "spam-tellere blir blanke ark.\n\n" +
+                        "E-postene dine, aliasadressene, forventede og godkjente domener, replacement-status " +
+                        "og SMTP/cPanel-regler blir ikke rørt. Hele nullstillingen kan angres med " +
+                        "Angre siste valg.")
                 .setNegativeButton(android.R.string.cancel, null)
                 .setPositiveButton("Nullstill", (dialog, which) -> performReset(account))
                 .show();
@@ -244,6 +246,7 @@ public class ActivitySpamFamilyLab extends ActivityBase {
     private void performReset(EntityAccount account) {
         if (account == null || account.uuid == null)
             return;
+        final int scrollY = svContent == null ? 0 : svContent.getScrollY();
         tvStatus.setText("Nullstiller Spamkontroll …");
         executor.execute(() -> {
             boolean reset = SpamResetManager.resetLearning(
@@ -256,9 +259,14 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                     selectedGroup = null;
                     candidateGeneration.incrementAndGet();
                     showChooseGroupMessage();
-                    tvStatus.setText("All spam-læring er nullstilt. Du har blanke ark.");
+                    tvStatus.setText("All spamlæring er nullstilt. Du har blanke ark.");
+                    Snackbar.make(svContent,
+                                    "All spamlæring er nullstilt.",
+                                    Snackbar.LENGTH_LONG)
+                            .setAction("ANGRE", v -> undoLatest(account))
+                            .show();
                     if (svContent != null)
-                        svContent.post(() -> svContent.scrollTo(0, 0));
+                        svContent.post(() -> svContent.scrollTo(0, scrollY));
                 } else
                     tvStatus.setText("Kunne ikke nullstille læringen.");
             });
