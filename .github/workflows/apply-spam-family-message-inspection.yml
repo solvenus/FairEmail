@@ -1,0 +1,40 @@
+name: Apply spam family message inspection
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_spam_family_message_inspection.py'
+      - '.github/workflows/apply-spam-family-message-inspection.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed read-only family message inspection
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_spam_family_message_inspection.py
+          git diff --check
+          grep -F 'Button messages = primaryButton("Se meldinger")' app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          grep -F 'SpamFamilyLabRepository.getCandidates(' app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          grep -F '· read-only' app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Add read-only message inspection to spam groups"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
