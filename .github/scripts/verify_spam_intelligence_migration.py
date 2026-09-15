@@ -23,10 +23,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 JAVA = ROOT / "app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java"
 SCHEMA_ROOT = ROOT / "app/schemas"
-CURRENT_SCHEMA_VERSION = 10
+CURRENT_SCHEMA_VERSION = 11
 CASES = [
     ("MIGRATION_8_9", "spam_family_exclusion"),
     ("MIGRATION_9_10", "spam_action_history"),
+    ("MIGRATION_10_11", "spam_message"),
 ]
 
 
@@ -101,6 +102,16 @@ def verify_case(migration: str, table: str) -> None:
 
     db = sqlite3.connect(":memory:")
     try:
+        # MIGRATION_10_11 copies from alias_delivery after creating spam_message.
+        # Build only the minimal source table shape needed for that preservation step.
+        if migration == "MIGRATION_10_11":
+            db.execute(
+                "CREATE TABLE alias_delivery ("
+                "account_uuid TEXT NOT NULL, message_id INTEGER NOT NULL, received INTEGER NOT NULL, "
+                "folder_type TEXT, address TEXT NOT NULL, label INTEGER NOT NULL, family_id INTEGER, "
+                "predicted_family_id INTEGER, family_score REAL, family_assessed_at INTEGER, "
+                "PRIMARY KEY(account_uuid, message_id))"
+            )
         for statement in statements:
             db.execute(statement)
 
