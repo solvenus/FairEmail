@@ -121,9 +121,38 @@ public interface DaoAlias {
     int setDeliveryEvidence(String accountUuid, long messageId,
                             String senderDomain, boolean hasUnsubscribe);
 
+    @Query("UPDATE alias_delivery SET" +
+            " spam_support = :spamSupport," +
+            " ham_support = :hamSupport," +
+            " traffic_net = :net," +
+            " traffic_verdict = :verdict," +
+            " traffic_reasons = :reasons," +
+            " assessed_at = :assessedAt" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int setDeliveryAssessment(String accountUuid, long messageId,
+                              double spamSupport, double hamSupport, double net,
+                              String verdict, String reasons, long assessedAt);
+
     @Query("UPDATE alias_delivery SET label = :label, family_id = :familyId" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     int setDeliveryLabel(String accountUuid, long messageId, int label, Long familyId);
+
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND traffic_verdict = :verdict" +
+            " ORDER BY spam_support DESC, received DESC")
+    LiveData<List<EntityAliasDelivery>> liveByTrafficVerdict(String accountUuid, String verdict);
+
+    @Query("SELECT sender_domain AS domain," +
+            " COUNT(*) AS messages," +
+            " SUM(CASE WHEN has_unsubscribe THEN 1 ELSE 0 END) AS unsubscribe," +
+            " SUM(CASE WHEN label = " + EntityAliasDelivery.LABEL_HAM + " THEN 1 ELSE 0 END) AS ham," +
+            " SUM(CASE WHEN label = " + EntityAliasDelivery.LABEL_SPAM + " THEN 1 ELSE 0 END) AS spam" +
+            " FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND address = :address" +
+            " AND sender_domain IS NOT NULL" +
+            " GROUP BY sender_domain" +
+            " ORDER BY ham DESC, unsubscribe DESC, messages DESC, sender_domain COLLATE NOCASE")
+    List<TupleAliasDomainStats> getDomainStats(String accountUuid, String address);
 
     @Query("SELECT COUNT(*) FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid AND address = :address")
