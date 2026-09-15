@@ -772,10 +772,8 @@ public class ActivitySpamControl extends ActivityBase {
         form.addView(observed, matchWrap());
 
         TextView history = bodyText("Først sett: " + formatWhen(alias.first_seen) +
-                "
-Sist sett: " + formatWhen(alias.last_seen) +
-                "
-Siste spam: " + formatWhen(alias.last_spam));
+                "\nSist sett: " + formatWhen(alias.last_seen) +
+                "\nSiste spam: " + formatWhen(alias.last_spam));
         history.setPadding(0, dp(3), 0, dp(8));
         form.addView(history, matchWrap());
 
@@ -1158,8 +1156,7 @@ Siste spam: " + formatWhen(alias.last_spam));
         List<String> labels = new ArrayList<>();
         for (Long familyId : network.familyIds)
             labels.add(familyLabel(familyId));
-        body.addView(bodyText(TextUtils.join("
-", labels)), matchWrapWithMargin(0, 4, 0, 0));
+        body.addView(bodyText(TextUtils.join("\n", labels)), matchWrapWithMargin(0, 4, 0, 0));
         body.addView(bodyText("Sterkeste infrastruktur/template-kobling: " + percent(network.strongestScore)),
                 matchWrapWithMargin(0, 4, 0, 0));
         card.addView(body, matchWrap());
@@ -1171,11 +1168,9 @@ Siste spam: " + formatWhen(alias.last_spam));
         for (TupleSpamFamilyOverview family : families)
             if (family.family_id == familyId) {
                 if (!TextUtils.isEmpty(family.name))
-                    return family.name.trim() + (descriptor == null ? "" : " · " + descriptor.replace('
-', ' '));
+                    return family.name.trim() + (descriptor == null ? "" : " · " + descriptor.replace('\n', ' '));
                 if (descriptor != null)
-                    return descriptor.replace('
-', ' ');
+                    return descriptor.replace('\n', ' ');
                 break;
             }
         return "Spamgruppe " + familyId;
@@ -1193,16 +1188,12 @@ Siste spam: " + formatWhen(alias.last_spam));
         StringBuilder text = new StringBuilder();
         for (EntitySpamActionHistory action : recentActions) {
             if (text.length() > 0)
-                text.append("
-
-");
+                text.append("\n\n");
             text.append(formatWhen(action.created_at)).append(" · ")
                     .append(action.description == null ? action.action : action.description);
             if (action.message_id != null)
-                text.append("
-Melding: ").append(action.message_id);
-            text.append("
-Status: ").append(action.undone_at == null ? "aktiv" : "angret");
+                text.append("\nMelding: ").append(action.message_id);
+            text.append("\nStatus: ").append(action.undone_at == null ? "aktiv" : "angret");
         }
         new AlertDialog.Builder(this)
                 .setTitle("Læringshistorikk")
@@ -1216,40 +1207,24 @@ Status: ").append(action.undone_at == null ? "aktiv" : "angret");
         if (account == null)
             return;
         StringBuilder text = new StringBuilder();
-        text.append("Spamkontroll status
-")
-                .append("Konto: ").append(accountLabel(account)).append('
-')
-                .append("Arbeidskø: ").append(reviewCount).append('
-')
-                .append("Aliaser: ").append(aliases.size()).append('
-')
-                .append("Spamgrupper: ").append(families.size()).append('
-')
-                .append("Spamnettverk: ").append(networks.size()).append("
-
-")
-                .append("Regler
-")
-                .append("Exact family: ").append(SpamControlPolicy.exactFamilyDetection(this)).append('
-')
-                .append("Auto-label exact: ").append(SpamControlPolicy.autoLabelExact(this)).append('
-')
-                .append("Spam kompromitterer alias: ").append(SpamControlPolicy.markAliasCompromised(this)).append('
-')
-                .append("Fremmed sender evidens: ").append(SpamControlPolicy.foreignSenderEvidence(this)).append('
-')
-                .append("SMTP-burn: ").append(SpamControlPolicy.smtpBurnEnabled(this)).append("
-
-")
-                .append("Aliasstatus
-");
+        text.append("Spamkontroll status\n")
+                .append("Konto: ").append(accountLabel(account)).append('\n')
+                .append("Arbeidskø: ").append(reviewCount).append('\n')
+                .append("Aliaser: ").append(aliases.size()).append('\n')
+                .append("Spamgrupper: ").append(families.size()).append('\n')
+                .append("Spamnettverk: ").append(networks.size()).append("\n\n")
+                .append("Regler\n")
+                .append("Exact family: ").append(SpamControlPolicy.exactFamilyDetection(this)).append('\n')
+                .append("Auto-label exact: ").append(SpamControlPolicy.autoLabelExact(this)).append('\n')
+                .append("Spam kompromitterer alias: ").append(SpamControlPolicy.markAliasCompromised(this)).append('\n')
+                .append("Fremmed sender evidens: ").append(SpamControlPolicy.foreignSenderEvidence(this)).append('\n')
+                .append("SMTP-burn: ").append(SpamControlPolicy.smtpBurnEnabled(this)).append("\n\n")
+                .append("Aliasstatus\n");
         for (EntityAlias alias : aliases)
             text.append(alias.address).append(" · ").append(aliasState(alias))
                     .append(" · spam=").append(alias.spam_hits == null ? 0 : alias.spam_hits)
                     .append(" · ham=").append(alias.ham_hits == null ? 0 : alias.ham_hits)
-                    .append(" · smtp=").append(smtpState(alias)).append('
-');
+                    .append(" · smtp=").append(smtpState(alias)).append('\n');
 
         Intent share = new Intent(Intent.ACTION_SEND);
         share.setType("text/plain");
