@@ -1,0 +1,92 @@
+name: Apply review conflict impact via API
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/workflows/apply-review-conflict-impact-api.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      REPO: ${{ github.repository }}
+      BRANCH: feature/spam-control-p0
+    steps:
+      - name: Apply stored fail-closed patch through Contents API
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import base64, json, os, pathlib, subprocess, tempfile, urllib.parse, urllib.request
+
+          repo = os.environ['REPO']
+          branch = os.environ['BRANCH']
+          token = os.environ['GH_TOKEN']
+          source_path = 'app/src/main/java/eu/faircode/email/ActivitySpamControl.java'
+          script_path = '.github/scripts/patch_review_conflict_impact.py'
+          headers = {
+              'Authorization': f'Bearer {token}',
+              'Accept': 'application/vnd.github+json',
+              'X-GitHub-Api-Version': '2022-11-28',
+              'User-Agent': 'spam-control-patcher',
+          }
+
+          def api_get(path):
+              url = f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(path)}?ref={urllib.parse.quote(branch)}'
+              req = urllib.request.Request(url, headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  return json.loads(response.read().decode())
+
+          def api_put(path, sha, content):
+              url = f'https://api.github.com/repos/{repo}/contents/{urllib.parse.quote(path)}'
+              payload = json.dumps({
+                  'message': 'Show review conflicts and exact identity impact',
+                  'content': base64.b64encode(content.encode()).decode(),
+                  'sha': sha,
+                  'branch': branch,
+              }).encode()
+              req = urllib.request.Request(url, data=payload, method='PUT', headers=headers)
+              with urllib.request.urlopen(req) as response:
+                  return json.loads(response.read().decode())
+
+          src = api_get(source_path)
+          script = api_get(script_path)
+          source_text = base64.b64decode(src['content']).decode()
+          script_text = base64.b64decode(script['content']).decode()
+
+          if ('⚠ KONFLIKT I EVIDENS' in source_text and
+                  'private int reviewIdentityCount(SpamFamilyLabRepository.Candidate candidate)' in source_text):
+              print('Patch already present; nothing to do')
+              raise SystemExit(0)
+
+          with tempfile.TemporaryDirectory() as tmp:
+              root = pathlib.Path(tmp)
+              target = root / source_path
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_text(source_text)
+              patcher = root / script_path
+              patcher.parent.mkdir(parents=True, exist_ok=True)
+              patcher.write_text(script_text)
+              subprocess.run(['python3', str(patcher)], cwd=root, check=True)
+              updated = target.read_text()
+
+          required = [
+              '⚠ KONFLIKT I EVIDENS',
+              'conflicting_evidence',
+              'Minst " + identityTwins +',
+              'private int reviewIdentityCount(SpamFamilyLabRepository.Candidate candidate)',
+              'SpamFamilyIdentity.fromRaw(',
+          ]
+          for needle in required:
+              if needle not in updated:
+                  raise SystemExit(f'missing required patch marker: {needle}')
+
+          result = api_put(source_path, src['sha'], updated)
+          print('updated', result['commit']['sha'])
+          PY
