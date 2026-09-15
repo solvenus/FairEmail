@@ -29,6 +29,8 @@ public final class AliasBurnReadiness {
             throw new IllegalArgumentException("alias");
 
         AliasBurnPolicy.Input input = baseInput(alias);
+        if (context != null)
+            input.compromiseNeedsReview = AliasCompromiseReviewStore.needsReview(context, alias);
         if (context != null && input.replacementConfigured &&
                 alias.account_uuid != null && alias.replaced_by != null) {
             EntityAlias replacement = SpamIntelligenceDB.getInstance(context)
@@ -52,6 +54,7 @@ public final class AliasBurnReadiness {
         input.aliasCompromised = alias.state != null &&
                 (alias.state == EntityAlias.STATE_COMPROMISED ||
                         alias.state == EntityAlias.STATE_REPLACED);
+        input.compromiseNeedsReview = !input.aliasCompromised && input.spamHits > 0;
         input.serviceDomainKnown = !TextUtils.isEmpty(alias.service_domain);
         input.trustedDomainsConfigured = hasTrustedDomains(alias.trusted_domains);
         input.replacementConfigured = !TextUtils.isEmpty(alias.replaced_by);

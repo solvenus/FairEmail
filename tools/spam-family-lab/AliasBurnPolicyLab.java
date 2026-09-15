@@ -16,11 +16,21 @@ public final class AliasBurnPolicyLab {
 
         AliasBurnPolicy.Input spamButNotCompromised = new AliasBurnPolicy.Input();
         spamButNotCompromised.spamHits = 8;
+        spamButNotCompromised.compromiseNeedsReview = true;
         AliasBurnPolicy.Result review = AliasBurnPolicy.evaluate(spamButNotCompromised);
         require(review.verdict == AliasBurnPolicy.Verdict.REVIEW_COMPROMISE,
                 "spam truth alone must not become alias-compromise truth");
         require(!review.compromised && !review.burnAllowed,
                 "unconfirmed compromise must not authorize burn");
+
+        AliasBurnPolicy.Input resolvedHealthySpam = new AliasBurnPolicy.Input();
+        resolvedHealthySpam.spamHits = 8;
+        resolvedHealthySpam.compromiseNeedsReview = false;
+        AliasBurnPolicy.Result resolved = AliasBurnPolicy.evaluate(resolvedHealthySpam);
+        require(resolved.verdict == AliasBurnPolicy.Verdict.HEALTHY,
+                "spam truth with resolved healthy alias must not reopen compromise review");
+        require(!resolved.compromised,
+                "resolved healthy spam must keep alias truth separate from spam truth");
 
         AliasBurnPolicy.Input leakedService = new AliasBurnPolicy.Input();
         leakedService.aliasCompromised = true;
@@ -88,7 +98,7 @@ public final class AliasBurnPolicyLab {
         require(!f.burnAllowed, "already dead alias is not burn-ready again");
 
         System.out.println("PASS burn-policy " +
-                a.verdict + "," + review.verdict + "," + b.verdict + "," +
+                a.verdict + "," + review.verdict + "," + resolved.verdict + "," + b.verdict + "," +
                 verify.verdict + "," + c.verdict + "," + d.verdict + "," +
                 e.verdict + "," + f.verdict);
     }

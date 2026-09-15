@@ -17,9 +17,9 @@ import java.util.List;
  * Pure-Java policy for the lifecycle AFTER spam and alias compromise have been
  * evaluated as separate truths.
  *
- * A spam hit alone never authorizes SMTP burn. The alias lifecycle must itself
- * be COMPROMISED/REPLACED and the configured replacement must be verified from
- * observed legitimate traffic before the destructive server action is ready.
+ * This policy computes advisory lifecycle/readiness, not authorization. The
+ * human can explicitly veto replacement/readiness advice and request SMTP burn.
+ * A spam hit alone is never proof that the alias itself is compromised.
  */
 public final class AliasBurnPolicy {
     private AliasBurnPolicy() {
@@ -49,6 +49,7 @@ public final class AliasBurnPolicy {
         public int spamHits;
         public int hamHits;
         public boolean aliasCompromised;
+        public boolean compromiseNeedsReview;
         public boolean serviceDomainKnown;
         public boolean trustedDomainsConfigured;
         public boolean replacementConfigured;
@@ -104,12 +105,16 @@ public final class AliasBurnPolicy {
         }
 
         if (!compromised) {
-            if (spam > 0) {
-                reasons.add("confirmed-spam=" + spam);
-                reasons.add("alias-compromise-not-confirmed");
+            if (input.compromiseNeedsReview) {
+                if (spam > 0)
+                    reasons.add("confirmed-spam=" + spam);
+                reasons.add("alias-compromise-needs-review");
                 return new Result(Verdict.REVIEW_COMPROMISE, false, false, reasons);
             }
-            reasons.add("no-confirmed-spam");
+            if (spam > 0)
+                reasons.add("confirmed-spam-without-alias-compromise=" + spam);
+            else
+                reasons.add("no-confirmed-spam");
             return new Result(Verdict.HEALTHY, false, false, reasons);
         }
 

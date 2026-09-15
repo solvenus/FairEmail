@@ -30,12 +30,14 @@ public final class SpamControlAttentionStats {
         int serverFailures = 0;
         int replacementMissing = 0;
         int replacementUnverified = 0;
+        boolean compromisePolicyEnabled = SpamControlPolicy.markAliasCompromised(context);
 
         for (EntityAlias alias : aliases) {
             if (alias == null)
                 continue;
 
-            if (AliasCompromiseReviewStore.needsReview(context, alias))
+            if (compromisePolicyEnabled &&
+                    AliasCompromiseReviewStore.needsReview(context, alias))
                 compromiseDecisions++;
 
             if (alias.smtp_reject_state != null &&
