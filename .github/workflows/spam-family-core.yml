@@ -1,4 +1,4 @@
-# Gate trigger: hardened exact-family semantics
+# Gate trigger: exact-family semantics + reversible cPanel route planning
 name: Spam Family Core
 
 on:
@@ -17,6 +17,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnPolicy.java'
       - 'app/src/main/java/eu/faircode/email/AliasCompromisePolicy.java'
+      - 'app/src/main/java/eu/faircode/email/CpanelForwarderRoutePlan.java'
       - 'tools/spam-family-lab/**'
       - '.github/workflows/spam-family-core.yml'
   workflow_dispatch:
@@ -50,13 +51,15 @@ jobs:
             app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java \
             app/src/main/java/eu/faircode/email/AliasBurnPolicy.java \
             app/src/main/java/eu/faircode/email/AliasCompromisePolicy.java \
+            app/src/main/java/eu/faircode/email/CpanelForwarderRoutePlan.java \
             tools/spam-family-lab/SpamFamilyLab.java \
             tools/spam-family-lab/AliasBurnPolicyLab.java \
             tools/spam-family-lab/AliasCompromisePolicyLab.java \
             tools/spam-family-lab/SpamFamilySerializationLab.java \
             tools/spam-family-lab/SpamFamilyPredictionPolicyLab.java \
             tools/spam-family-lab/SpamDecisionScorerLab.java \
-            tools/spam-family-lab/SpamFamilyIdentityLab.java
+            tools/spam-family-lab/SpamFamilyIdentityLab.java \
+            tools/spam-family-lab/CpanelForwarderRoutePlanLab.java
       - name: Run spam family lab
         run: |
           set -euo pipefail
@@ -85,3 +88,7 @@ jobs:
         run: |
           set -euo pipefail
           java -cp build/spam-family-core eu.faircode.email.SpamFamilyIdentityLab
+      - name: Run cPanel route planner lab
+        run: |
+          set -euo pipefail
+          java -cp build/spam-family-core eu.faircode.email.CpanelForwarderRoutePlanLab
