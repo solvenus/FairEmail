@@ -15,14 +15,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.Callable;
 
-/**
- * Persistent semantic undo stack for explicit human choices in Spam Control.
- *
- * A durable BEFORE checkpoint is inserted before mutation starts. This makes
- * every UI choice recoverable even if the process dies mid-action. The stack is
- * global and chronological so "Angre siste valg" always means exactly that.
- */
+/** Persistent semantic undo stack for explicit human choices in Spam Control. */
 public final class SpamUndoManager {
+    public static final String ACTION_SPAM = "SPAM";
     public static final String ACTION_SAME_SPAM = "SAME_SPAM";
     public static final String ACTION_OTHER_SPAM = "OTHER_SPAM";
     public static final String ACTION_NOT_SPAM = "NOT_SPAM";
@@ -65,8 +60,6 @@ public final class SpamUndoManager {
             return result;
         } catch (Throwable ex) {
             Log.e(ex);
-            // If a checkpoint exists, deliberately keep it. The mutation may
-            // have started before the exception and the checkpoint is recovery.
             return SpamFamilyLabRepository.ActionResult.REJECTED;
         }
     }
@@ -107,11 +100,6 @@ public final class SpamUndoManager {
         }
     }
 
-    /**
-     * Reset every account's learned spam state while preserving FairEmail mail,
-     * passive alias inventory, manually configured domains and SMTP/cPanel state.
-     * The reset itself is a normal undoable action.
-     */
     public static boolean resetAllLearning(Context context, String historyAccountUuid) {
         if (context == null || historyAccountUuid == null || historyAccountUuid.trim().isEmpty())
             return false;
@@ -126,13 +114,10 @@ public final class SpamUndoManager {
             return true;
         } catch (Throwable ex) {
             Log.e(ex);
-            // A checkpoint inserted before a partial reset intentionally remains
-            // available as the newest undo action.
             return false;
         }
     }
 
-    /** Latest human action anywhere in Spam Control. */
     public static EntitySpamActionHistory latest(Context context) {
         if (context == null)
             return null;
@@ -145,15 +130,10 @@ public final class SpamUndoManager {
         }
     }
 
-    /** Compatibility helper for callers that still provide an account. */
     public static EntitySpamActionHistory latest(Context context, String accountUuid) {
         return latest(context);
     }
 
-    /**
-     * Undo the globally newest human action. The account parameter is retained
-     * for source compatibility; ordering is intentionally global.
-     */
     public static UndoResult undoLatest(Context context, String accountUuid) {
         if (context == null)
             return UndoResult.FAILED;
@@ -176,7 +156,6 @@ public final class SpamUndoManager {
             return UndoResult.APPLIED;
         } catch (Throwable ex) {
             Log.e(ex);
-            // Never consume the recovery point when restoration fails.
             return UndoResult.FAILED;
         }
     }
