@@ -60,6 +60,18 @@ public final class SpamIntelligence {
                     evidence.senderDomain,
                     evidence.unsubscribe);
 
+            // Evaluate only. Automatic move/delete remains disabled until replay
+            // has established precision on real user data.
+            AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(context, account, message);
+            if (traffic.alias != null)
+                Log.i("AliasTraffic" +
+                        " alias=" + traffic.alias +
+                        " sender=" + traffic.senderDomain +
+                        " service=" + traffic.serviceDomain +
+                        " aliasLabels=" + traffic.aliasSpam + "/" + traffic.aliasHam +
+                        " senderLabels=" + traffic.senderSpam + "/" + traffic.senderHam +
+                        " " + traffic.assessment);
+
             // Reuse FairEmail's existing sender_extra mechanism, but constrain it
             // to exact active aliases already observed in our registry.
             AliasSenderManager.synchronizeForMessage(context, account, message);
