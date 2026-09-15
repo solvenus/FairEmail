@@ -5,6 +5,7 @@ on:
     branches:
       - feature/spam-families
     paths:
+      - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainAffinity.java'
       - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
       - 'app/src/main/java/eu/faircode/email/AliasSenderManager.java'
@@ -17,6 +18,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
+      - 'app/src/main/java/eu/faircode/email/TupleAliasDomainStats.java'
       - '.github/workflows/spam-intelligence-android.yml'
   workflow_dispatch:
 
