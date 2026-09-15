@@ -1,4 +1,4 @@
-# Gate trigger: real Spam Control dashboard
+# Gate trigger: repaired Spam Control prototype minimum
 name: Spam Intelligence Android Compile
 
 on:
