@@ -7,6 +7,8 @@ on:
     paths:
       - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainAffinity.java'
+      - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
+      - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestions.java'
       - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
       - 'app/src/main/java/eu/faircode/email/AliasSenderManager.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficAnalyzer.java'
