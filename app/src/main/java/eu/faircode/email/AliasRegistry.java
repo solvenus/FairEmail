@@ -83,6 +83,8 @@ public final class AliasRegistry {
      * evidence, while every other inbound folder is UNKNOWN, not automatically
      * HAM. Explicit not-spam evidence can be fed into observe() later.
      *
+     * SQL aggregates before Java sees the rows so rebuilding the registry scales
+     * with alias/folder combinations rather than total mailbox size.
      * Call this off the main thread.
      */
     public static Model fromDatabase(Context context) {
@@ -90,14 +92,17 @@ public final class AliasRegistry {
         String sql =
                 "SELECT message.account AS account" +
                 ", message.deliveredto AS delivered_to" +
-                ", message.received AS received" +
                 ", folder.type AS folder_type" +
+                ", COUNT(message.id) AS message_count" +
+                ", MIN(message.received) AS first_seen" +
+                ", MAX(message.received) AS last_seen" +
                 " FROM message" +
                 " JOIN folder ON folder.id = message.folder" +
                 " WHERE message.deliveredto IS NOT NULL" +
                 " AND TRIM(message.deliveredto) <> ''" +
-                " AND NOT message.ui_hide" +
-                " AND folder.type NOT IN (?, ?, ?)";
+                " AND message.ui_hide = 0" +
+                " AND folder.type NOT IN (?, ?, ?)" +
+                " GROUP BY message.account, message.deliveredto, folder.type";
 
         DB db = DB.getInstance(context);
         try (Cursor cursor = db.query(sql, new Object[]{
@@ -107,21 +112,25 @@ public final class AliasRegistry {
         })) {
             int cAccount = cursor.getColumnIndexOrThrow("account");
             int cDeliveredTo = cursor.getColumnIndexOrThrow("delivered_to");
-            int cReceived = cursor.getColumnIndexOrThrow("received");
             int cFolderType = cursor.getColumnIndexOrThrow("folder_type");
+            int cCount = cursor.getColumnIndexOrThrow("message_count");
+            int cFirstSeen = cursor.getColumnIndexOrThrow("first_seen");
+            int cLastSeen = cursor.getColumnIndexOrThrow("last_seen");
 
             while (cursor.moveToNext()) {
                 String folderType = cursor.getString(cFolderType);
                 Verdict verdict = EntityFolder.JUNK.equals(folderType)
                         ? Verdict.SPAM
                         : Verdict.UNKNOWN;
-                model.observe(new Observation(
+                model.observeAggregate(
                         cursor.getLong(cAccount),
                         cursor.getString(cDeliveredTo),
-                        cursor.getLong(cReceived),
                         folderType,
                         verdict,
-                        null));
+                        null,
+                        cursor.getLong(cCount),
+                        cursor.getLong(cFirstSeen),
+                        cursor.getLong(cLastSeen));
             }
         }
         return model;
@@ -131,37 +140,63 @@ public final class AliasRegistry {
         private final Map<Key, MutableEntry> entries = new HashMap<>();
 
         public Entry observe(Observation observation) {
-            if (observation == null) throw new IllegalArgumentException("observation");
-            String alias = normalizeAddress(observation.deliveredTo);
-            if (alias == null) return null;
+            if (observation == null)
+                throw new IllegalArgumentException("observation");
+            long timestamp = observation.received > 0
+                    ? observation.received
+                    : System.currentTimeMillis();
+            return observeAggregate(
+                    observation.account,
+                    observation.deliveredTo,
+                    observation.folderType,
+                    observation.verdict,
+                    observation.spamFamilyId,
+                    1,
+                    timestamp,
+                    timestamp);
+        }
 
-            Key key = new Key(observation.account, alias);
+        Entry observeAggregate(long account, String deliveredTo, String folderType,
+                               Verdict verdict, Long spamFamilyId, long count,
+                               long firstSeen, long lastSeen) {
+            if (count <= 0)
+                return null;
+
+            String alias = normalizeAddress(deliveredTo);
+            if (alias == null)
+                return null;
+
+            Key key = new Key(account, alias);
             MutableEntry entry = entries.get(key);
             if (entry == null) {
-                entry = new MutableEntry(observation.account, alias);
+                entry = new MutableEntry(account, alias);
                 entries.put(key, entry);
             }
 
-            long timestamp = observation.received > 0 ? observation.received : System.currentTimeMillis();
-            if (entry.firstSeen == 0 || timestamp < entry.firstSeen) entry.firstSeen = timestamp;
-            if (timestamp > entry.lastSeen) entry.lastSeen = timestamp;
-            entry.messages++;
-            if (observation.verdict == Verdict.SPAM)
-                entry.spam++;
-            else if (observation.verdict == Verdict.HAM)
-                entry.ham++;
+            if (firstSeen > 0 && (entry.firstSeen == 0 || firstSeen < entry.firstSeen))
+                entry.firstSeen = firstSeen;
+            if (lastSeen > entry.lastSeen)
+                entry.lastSeen = lastSeen;
+            entry.messages += count;
+
+            Verdict resolved = (verdict == null ? Verdict.UNKNOWN : verdict);
+            if (resolved == Verdict.SPAM)
+                entry.spam += count;
+            else if (resolved == Verdict.HAM)
+                entry.ham += count;
             else
-                entry.unknown++;
+                entry.unknown += count;
 
-            String folder = normalizeToken(observation.folderType);
+            String folder = normalizeToken(folderType);
             if (folder != null)
-                entry.folders.put(folder, entry.folders.containsKey(folder) ? entry.folders.get(folder) + 1 : 1);
+                entry.folders.put(folder,
+                        entry.folders.containsKey(folder) ? entry.folders.get(folder) + count : count);
 
-            if (observation.spamFamilyId != null) {
-                Long id = observation.spamFamilyId;
-                entry.spamFamilies.put(id,
-                        entry.spamFamilies.containsKey(id) ? entry.spamFamilies.get(id) + 1 : 1);
-            }
+            if (spamFamilyId != null)
+                entry.spamFamilies.put(spamFamilyId,
+                        entry.spamFamilies.containsKey(spamFamilyId)
+                                ? entry.spamFamilies.get(spamFamilyId) + count
+                                : count);
 
             return entry.snapshot();
         }
@@ -256,7 +291,7 @@ public final class AliasRegistry {
             Collections.sort(entries, new Comparator<Entry>() {
                 @Override
                 public int compare(Entry a, Entry b) {
-                    int bySpam = Integer.compare(b.spam, a.spam);
+                    int bySpam = Long.compare(b.spam, a.spam);
                     if (bySpam != 0) return bySpam;
                     int byFamilies = Integer.compare(b.familyCount(), a.familyCount());
                     if (byFamilies != 0) return byFamilies;
@@ -273,16 +308,16 @@ public final class AliasRegistry {
         public final State state;
         public final long firstSeen;
         public final long lastSeen;
-        public final int messages;
-        public final int spam;
-        public final int ham;
-        public final int unknown;
-        public final Map<String, Integer> folders;
-        public final Map<Long, Integer> spamFamilies;
+        public final long messages;
+        public final long spam;
+        public final long ham;
+        public final long unknown;
+        public final Map<String, Long> folders;
+        public final Map<Long, Long> spamFamilies;
 
         private Entry(long account, String alias, String serviceName, State state,
-                      long firstSeen, long lastSeen, int messages, int spam, int ham, int unknown,
-                      Map<String, Integer> folders, Map<Long, Integer> spamFamilies) {
+                      long firstSeen, long lastSeen, long messages, long spam, long ham, long unknown,
+                      Map<String, Long> folders, Map<Long, Long> spamFamilies) {
             this.account = account;
             this.alias = alias;
             this.serviceName = serviceName;
@@ -304,7 +339,7 @@ public final class AliasRegistry {
 
         /** Fraction of explicitly labeled SPAM/HAM evidence only. */
         public double spamLabeledFraction() {
-            int labeled = spam + ham;
+            long labeled = spam + ham;
             return labeled == 0 ? 0 : (double) spam / labeled;
         }
 
@@ -346,8 +381,12 @@ public final class AliasRegistry {
         int at = address.lastIndexOf('@');
         if (at <= 0 || at + 1 >= address.length())
             return null;
-        return address.substring(0, at).toLowerCase(Locale.ROOT) + "@" +
-                address.substring(at + 1).toLowerCase(Locale.ROOT);
+
+        // RFC mailbox local-parts are not guaranteed to be case-insensitive.
+        // Preserve the local-part exactly; DNS/domain comparison is case-insensitive.
+        String local = address.substring(0, at);
+        String domain = address.substring(at + 1).toLowerCase(Locale.ROOT);
+        return local + "@" + domain;
     }
 
     /**
@@ -358,7 +397,8 @@ public final class AliasRegistry {
         String address = normalizeAddress(deliveredTo);
         if (address == null) return null;
         String local = address.substring(0, address.indexOf('@'));
-        if (local.startsWith("sd_") && local.length() > 3)
+        String lower = local.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("sd_") && local.length() > 3)
             return local.substring(3);
         return null;
     }
@@ -407,12 +447,12 @@ public final class AliasRegistry {
         State state = State.ACTIVE;
         long firstSeen;
         long lastSeen;
-        int messages;
-        int spam;
-        int ham;
-        int unknown;
-        final Map<String, Integer> folders = new HashMap<>();
-        final Map<Long, Integer> spamFamilies = new HashMap<>();
+        long messages;
+        long spam;
+        long ham;
+        long unknown;
+        final Map<String, Long> folders = new HashMap<>();
+        final Map<Long, Long> spamFamilies = new HashMap<>();
 
         MutableEntry(long account, String alias) {
             this.account = account;
