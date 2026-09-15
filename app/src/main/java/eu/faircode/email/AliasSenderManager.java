@@ -91,7 +91,7 @@ public final class AliasSenderManager {
         List<EntityAlias> entries = aliases.getAliases(account.uuid);
         List<String> addresses = new ArrayList<>();
         for (EntityAlias entry : entries) {
-            if (entry == null || entry.state != EntityAlias.STATE_ACTIVE)
+            if (entry == null || !isReplyCapable(entry.state))
                 continue;
             String address = AliasRegistry.normalizeAddress(entry.address);
             if (address != null && identityDomain.equalsIgnoreCase(domain(address)))
@@ -132,6 +132,12 @@ public final class AliasSenderManager {
         meta.text_value = regex;
         aliases.putMeta(meta);
         return true;
+    }
+
+    static boolean isReplyCapable(int state) {
+        // COMPROMISED means leaked, not retired. The address remains usable until
+        // the service has been rotated and the old alias is replaced/disabled.
+        return state == EntityAlias.STATE_ACTIVE || state == EntityAlias.STATE_COMPROMISED;
     }
 
     private static EntityIdentity selectIdentity(List<EntityIdentity> identities, String domain) {
