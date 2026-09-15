@@ -11,6 +11,7 @@ package eu.faircode.email;
 
 import android.content.Context;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /** Persistent counterpart of SpamFamilyEngine.Model. */
@@ -29,6 +30,39 @@ public final class SpamFamilyStore {
             this.familyId = familyId;
             this.score = score;
             this.spamLike = spamLike;
+        }
+    }
+
+    /** Immutable in-memory view of one family's bounded exemplar set. */
+    public static final class FamilyMatcher {
+        public final long familyId;
+        private final List<SpamFamilyFingerprint> exemplars;
+
+        private FamilyMatcher(long familyId, List<SpamFamilyFingerprint> exemplars) {
+            this.familyId = familyId;
+            this.exemplars = exemplars;
+        }
+
+        public SpamFamilyEngine.Score score(SpamFamilyFingerprint fingerprint) {
+            if (fingerprint == null)
+                return SpamFamilyEngine.Score.ZERO;
+            SpamFamilyEngine.Score best = SpamFamilyEngine.Score.ZERO;
+            for (SpamFamilyFingerprint exemplar : exemplars) {
+                SpamFamilyEngine.Score score = SpamFamilyEngine.compare(fingerprint, exemplar);
+                if (score.value > best.value)
+                    best = score;
+            }
+            return best;
+        }
+
+        public Match match(SpamFamilyFingerprint fingerprint) {
+            SpamFamilyEngine.Score score = score(fingerprint);
+            return new Match(familyId, score,
+                    score.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD);
+        }
+
+        public int exemplarCount() {
+            return exemplars.size();
         }
     }
 
@@ -59,6 +93,36 @@ public final class SpamFamilyStore {
                 best.familyId != null && best.score.value >= SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD);
     }
 
+    /** Load and decode one family once for an entire retroactive scan. */
+    public static synchronized FamilyMatcher loadMatcher(Context context,
+                                                         String accountUuid,
+                                                         long familyId) {
+        if (context == null || accountUuid == null || familyId <= 0)
+            return null;
+
+        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
+        EntitySpamFamily family = dao.getFamily(familyId);
+        if (family == null || family.id == null || !family.active ||
+                !accountUuid.equals(family.account_uuid))
+            return null;
+
+        List<EntitySpamFamilyExemplar> stored = dao.getExemplars(familyId);
+        if (stored == null || stored.isEmpty())
+            return null;
+
+        List<SpamFamilyFingerprint> decoded = new ArrayList<>();
+        for (EntitySpamFamilyExemplar exemplar : stored) {
+            if (exemplar == null || exemplar.fingerprint == null)
+                continue;
+            try {
+                decoded.add(SpamFamilyFingerprint.fromBytes(exemplar.fingerprint));
+            } catch (Throwable ex) {
+                Log.w(ex);
+            }
+        }
+        return decoded.isEmpty() ? null : new FamilyMatcher(familyId, decoded);
+    }
+
     public static synchronized LearnResult learnSpam(Context context,
                                                      String accountUuid,
                                                      long messageId,
@@ -73,7 +137,7 @@ public final class SpamFamilyStore {
         EntitySpamFamilyExemplar existing = dao.getExemplar(accountUuid, messageId);
         if (existing != null) {
             EntitySpamFamily family = dao.getFamily(existing.family_id);
-            if (family != null && !Boolean.TRUE.equals(family.active))
+            if (family != null && !family.active)
                 dao.setFamilyActive(family.id, true, System.currentTimeMillis());
             return new LearnResult(existing.family_id, false, false,
                     scoreSafely(fingerprint, existing.fingerprint));
@@ -201,6 +265,10 @@ public final class SpamFamilyStore {
     private static void reconcileFamily(DaoSpamFamily dao, long familyId, long now) {
         int confirmed = dao.countConfirmedMembers(familyId);
         if (confirmed <= 0) {
+            // Predictions are evidence, not foreign keys. Clear them explicitly
+            // before deleting the model so UI can never point at a dead family.
+            dao.clearPredictionsForFamily(familyId, now);
+            dao.deleteRescoreTasksForFamily(familyId);
             dao.deleteExemplars(familyId);
             dao.deleteFamily(familyId);
         } else
