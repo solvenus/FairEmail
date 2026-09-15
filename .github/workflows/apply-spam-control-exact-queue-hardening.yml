@@ -1,0 +1,36 @@
+name: Apply Spam Control exact queue hardening
+
+on:
+  push:
+    branches:
+      - feature/spam-families
+    paths:
+      - .github/scripts/apply_spam_control_exact_queue_hardening.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/spam-families
+          fetch-depth: 0
+      - name: Apply exact queue hardening
+        run: python3 .github/scripts/apply_spam_control_exact_queue_hardening.py
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/DaoAlias.java \
+                  app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git commit -m "Harden Spam Control exact review queue"
+          git push origin HEAD:feature/spam-families
