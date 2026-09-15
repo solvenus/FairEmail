@@ -6069,10 +6069,19 @@ public class FragmentCompose extends FragmentBase {
                                 }
                             }
 
-                            // Envelope-To is the authoritative reply alias. Resolve it against
-                            // the identity actually selected for this reply, not ref.identity: older
-                            // messages and messages ingested before alias synchronization can have a
-                            // null/stale reference identity even though the account identity is known.
+                            // Envelope-To is the authoritative reply alias. Re-observe the exact
+                            // reference message before resolving it so old messages and messages whose
+                            // alias registry synchronization lagged ingestion get repaired in the reply
+                            // path itself. observeMessage is idempotent for an already observed delivery.
+                            if (!TextUtils.isEmpty(ref.deliveredto) && ref.folder != null) {
+                                EntityAccount refAccount = db.account().getAccount(ref.account);
+                                EntityFolder refFolder = db.folder().getFolder(ref.folder);
+                                if (refAccount != null && refFolder != null)
+                                    SpamIntelligence.observeMessage(context, refAccount, refFolder, ref);
+                            }
+
+                            // Resolve against the identity actually selected for this reply, not
+                            // ref.identity: the latter may be null/stale on older messages.
                             String envelopeExtra = SpamIntelligence.resolveReplyExtra(
                                     context, selected, ref.deliveredto);
                             if (!TextUtils.isEmpty(envelopeExtra)) {
