@@ -171,9 +171,10 @@ public final class CpanelAliasActuator implements AliasServerActuator {
 
         Map<String, String> args = new TreeMap<>();
         args.put("domain", domain);
-        // Filtering is an optimization only; exact matching is still performed
-        // locally because the remote filter is not a security boundary.
-        args.put("regex", localPart(normalized));
+        // cPanel defines regex as PCRE. An alias local-part is data, not a
+        // regular expression: '+', '.', '(' and friends must never change
+        // which routes are returned. Fetch the domain routes and enforce the
+        // exact normalized source-address match locally below.
         JSONObject root = call("Email", "list_forwarders", args);
 
         JSONArray data = getDataArray(root);
@@ -375,11 +376,6 @@ public final class CpanelAliasActuator implements AliasServerActuator {
         if (at <= 0 || at + 1 >= address.length())
             return null;
         return address.substring(at + 1).toLowerCase(Locale.ROOT);
-    }
-
-    private static String localPart(String address) {
-        int at = address == null ? -1 : address.lastIndexOf('@');
-        return at <= 0 ? address : address.substring(0, at);
     }
 
     public static final class Config {
