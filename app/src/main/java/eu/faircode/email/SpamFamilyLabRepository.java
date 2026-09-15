@@ -277,7 +277,10 @@ public final class SpamFamilyLabRepository {
                     sender = from[0].toString();
             }
 
-            double value = delivery.family_score == null ? -1.0 : delivery.family_score;
+            boolean predictedThisFamily = delivery.predicted_family_id != null &&
+                    delivery.predicted_family_id == familyId;
+            Double selectedScore = predictedThisFamily ? delivery.family_score : null;
+            double value = selectedScore == null ? -1.0 : selectedScore;
             boolean confirmed = delivery.label == EntityAliasDelivery.LABEL_SPAM &&
                     delivery.family_id != null && delivery.family_id == familyId;
             return new Candidate(
@@ -293,13 +296,13 @@ public final class SpamFamilyLabRepository {
                     delivery.label,
                     delivery.family_id,
                     delivery.predicted_family_id,
-                    delivery.family_score,
-                    delivery.family_score_raw,
-                    delivery.family_text,
-                    delivery.family_structure,
-                    delivery.family_links,
-                    delivery.family_sender,
-                    delivery.family_assessed_at,
+                    selectedScore,
+                    predictedThisFamily ? delivery.family_score_raw : null,
+                    predictedThisFamily ? delivery.family_text : null,
+                    predictedThisFamily ? delivery.family_structure : null,
+                    predictedThisFamily ? delivery.family_links : null,
+                    predictedThisFamily ? delivery.family_sender : null,
+                    predictedThisFamily ? delivery.family_assessed_at : null,
                     value >= STRONG_THRESHOLD,
                     confirmed,
                     delivery.label == EntityAliasDelivery.LABEL_HAM);
