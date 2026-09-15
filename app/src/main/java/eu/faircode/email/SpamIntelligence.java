@@ -29,8 +29,7 @@ public final class SpamIntelligence {
             SpamFamilyRescorer.start(context);
             AliasBackfill.schedule(context);
 
-            if (folder == null || message == null || message.account == null ||
-                    message.deliveredto == null)
+            if (folder == null || message == null || message.account == null)
                 return;
             EntityAccount account = DB.getInstance(context).account().getAccount(message.account);
             observeMessage(context, account, folder, message);
@@ -46,28 +45,33 @@ public final class SpamIntelligence {
                                       EntityMessage message) {
         try {
             if (context == null || account == null || folder == null || message == null ||
-                    message.id == null || account.uuid == null || message.deliveredto == null)
+                    message.id == null || account.uuid == null)
                 return;
 
             SpamIntentObserver.start(context);
             SpamFamilyRescorer.start(context);
 
-            AliasDomainAffinity.Evidence evidence = AliasDomainAffinity.fromMessage(context, message);
-            SpamAliasStore.observeDelivery(
-                    context,
-                    account.uuid,
-                    message.id,
-                    message.deliveredto,
-                    message.received,
-                    folder.type,
-                    evidence.senderDomain,
-                    evidence.unsubscribe);
+            // Canonical message state always exists, even when Envelope-To was not retained.
+            SpamMessageStore.observe(context, account.uuid, message.id,
+                    message.received, folder.type, message.deliveredto);
 
-            refreshAssessment(context, account, message, true);
-            refreshFamilyMatch(context, account, message, true);
+            if (message.deliveredto != null) {
+                AliasDomainAffinity.Evidence evidence = AliasDomainAffinity.fromMessage(context, message);
+                SpamAliasStore.observeDelivery(
+                        context,
+                        account.uuid,
+                        message.id,
+                        message.deliveredto,
+                        message.received,
+                        folder.type,
+                        evidence.senderDomain,
+                        evidence.unsubscribe);
+                refreshAssessment(context, account, message, true);
+                AliasSenderManager.synchronizeForMessage(context, account, message);
+            }
+
+            refreshMessageFamilyState(context, account, message, true);
             maybeAutoLabelExact(context, account, message);
-
-            AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
             Log.e(ex);
         }
@@ -231,16 +235,20 @@ public final class SpamIntelligence {
 
             SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
             DaoAlias dao = intelligence.alias();
+            DaoSpamMessage messageDao = intelligence.message();
 
-            EntityAliasDelivery before = dao.getDelivery(account.uuid, message.id);
-            if (before == null && message.folder != null && message.deliveredto != null) {
+            EntitySpamMessage beforeMessage = messageDao.get(account.uuid, message.id);
+            if (beforeMessage == null && message.folder != null) {
                 EntityFolder folder = DB.getInstance(context).folder().getFolder(message.folder);
                 if (folder != null)
-                    observeMessage(context, account, folder, message);
-                before = dao.getDelivery(account.uuid, message.id);
+                    SpamMessageStore.observe(context, account.uuid, message.id,
+                            message.received, folder.type, message.deliveredto);
+                beforeMessage = messageDao.get(account.uuid, message.id);
             }
-            if (before == null)
+            if (beforeMessage == null)
                 return;
+
+            EntityAliasDelivery beforeAlias = dao.getDelivery(account.uuid, message.id);
 
             Long familyId = requestedFamilyId;
             SpamFamilyStore.LearnResult familyLearn = null;
@@ -274,28 +282,26 @@ public final class SpamIntelligence {
                             " previous=" + familyLearn.previousBest);
             }
 
-            boolean changed = SpamAliasStore.setLabel(
-                    context,
-                    account.uuid,
-                    message.id,
-                    label,
-                    familyId);
-            if (!changed) {
+            boolean messageChanged = SpamMessageStore.setLabel(
+                    context, account.uuid, message.id, label, familyId);
+            boolean aliasChanged = beforeAlias != null && SpamAliasStore.setLabel(
+                    context, account.uuid, message.id, label, familyId);
+            if (!messageChanged && !aliasChanged) {
                 if (familyLearn != null && familyLearn.learned &&
-                        before.label != EntityAliasDelivery.LABEL_SPAM)
+                        beforeMessage.label != EntitySpamMessage.LABEL_SPAM)
                     SpamFamilyStore.unlearnMessage(
                             context, account.uuid, message.id, familyLearn.familyId);
                 return;
             }
 
             Long changedFamily = null;
-            if (label == EntityAliasDelivery.LABEL_SPAM && familyId != null) {
+            if (label == EntitySpamMessage.LABEL_SPAM && familyId != null) {
                 SpamFamilyStore.reconcileFamily(context, familyId);
                 if (familyLearn != null && familyLearn.learned)
                     changedFamily = familyId;
-            } else if (before.label == EntityAliasDelivery.LABEL_SPAM) {
+            } else if (beforeMessage.label == EntitySpamMessage.LABEL_SPAM) {
                 changedFamily = SpamFamilyStore.unlearnMessage(
-                        context, account.uuid, message.id, before.family_id);
+                        context, account.uuid, message.id, beforeMessage.family_id);
             }
 
             if (changedFamily != null) {
@@ -307,7 +313,7 @@ public final class SpamIntelligence {
 
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
-                if (label == EntityAliasDelivery.LABEL_SPAM) {
+                if (label == EntitySpamMessage.LABEL_SPAM) {
                     if (SpamControlPolicy.markAliasCompromised(context)) {
                         AliasCompromisePolicy.Decision compromise =
                                 aliasCompromiseDecision(context, account, message);
@@ -330,8 +336,9 @@ public final class SpamIntelligence {
                 }
             }
 
-            refreshAssessment(context, account, message, false);
-            refreshFamilyMatch(context, account, message, false);
+            if (after != null)
+                refreshAssessment(context, account, message, false);
+            refreshMessageFamilyState(context, account, message, false);
         } catch (Throwable ex) {
             Log.e(ex);
         }
@@ -356,23 +363,27 @@ public final class SpamIntelligence {
                     " " + traffic.assessment);
     }
 
-    private static void refreshFamilyMatch(Context context,
-                                           EntityAccount account,
-                                           EntityMessage message,
-                                           boolean log) {
+    public static void refreshMessageFamilyState(Context context,
+                                                 EntityAccount account,
+                                                 EntityMessage message,
+                                                 boolean log) {
         if (context == null || account == null || account.uuid == null ||
                 message == null || message.id == null)
             return;
 
-        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        DaoSpamFamily dao = intelligence.family();
+        DaoSpamMessage messageDao = intelligence.message();
         long assessedAt = System.currentTimeMillis();
         if (!SpamControlPolicy.exactFamilyDetection(context)) {
+            messageDao.clearPrediction(account.uuid, message.id, assessedAt);
             dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
             return;
         }
 
         SpamFamilyIdentity.Identity identity = SpamFamilyMessageAdapter.identityFromMessage(message);
         if (identity == null) {
+            messageDao.clearPrediction(account.uuid, message.id, assessedAt);
             dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
             return;
         }
@@ -380,11 +391,15 @@ public final class SpamIntelligence {
         SpamFamilyStore.Match match = SpamFamilyStore.matchIdentity(
                 context, account.uuid, message.id, identity.key);
         if (match.familyId == null) {
+            messageDao.clearPrediction(account.uuid, message.id, assessedAt);
             dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
             return;
         }
 
         SpamFamilyEngine.Score score = match.score;
+        messageDao.setPrediction(account.uuid, message.id, match.familyId,
+                score.value, assessedAt);
+        // Mirror into alias_delivery when that optional enrichment row exists.
         dao.setFamilyMatch(account.uuid, message.id, match.familyId,
                 score.value, score.raw, score.text, score.structure,
                 score.links, score.sender, assessedAt);
@@ -399,13 +414,13 @@ public final class SpamIntelligence {
         if (!SpamControlPolicy.autoLabelExact(context) || message == null || message.id == null)
             return;
         try {
-            EntityAliasDelivery delivery = SpamIntelligenceDB.getInstance(context)
-                    .alias().getDelivery(account.uuid, message.id);
-            if (delivery == null || delivery.label != EntityAliasDelivery.LABEL_UNKNOWN ||
-                    delivery.predicted_family_id == null)
+            EntitySpamMessage state = SpamIntelligenceDB.getInstance(context)
+                    .message().get(account.uuid, message.id);
+            if (state == null || state.label != EntitySpamMessage.LABEL_UNKNOWN ||
+                    state.predicted_family_id == null)
                 return;
-            learnSpam(context, account, message, delivery.predicted_family_id);
-            Log.i("SpamControl auto-confirm exact family=" + delivery.predicted_family_id +
+            learnSpam(context, account, message, state.predicted_family_id);
+            Log.i("SpamControl auto-confirm exact family=" + state.predicted_family_id +
                     " message=" + message.id);
         } catch (Throwable ex) {
             Log.e(ex);
