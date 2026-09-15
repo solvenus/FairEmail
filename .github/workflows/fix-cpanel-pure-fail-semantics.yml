@@ -1,3 +1,4 @@
+# Trigger: mixed fail + forward must never count as verified SMTP dead
 name: Fix cPanel pure-fail semantics
 
 on:
