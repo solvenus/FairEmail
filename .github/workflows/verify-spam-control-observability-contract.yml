@@ -1,0 +1,27 @@
+name: Verify Spam Control observability contract
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+      - changeset/spam-control-semantic-architecture-v2
+      - audit/spam-control-observability-contract
+    paths:
+      - '.github/scripts/verify_spam_control_observability_contract.py'
+      - '.github/workflows/verify-spam-control-observability-contract.yml'
+      - 'app/src/main/java/eu/faircode/email/SpamHistoricalScanner.java'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamControl.java'
+      - 'app/src/main/java/eu/faircode/email/SpamControlLog.java'
+      - 'app/src/main/java/eu/faircode/email/CpanelAliasActuator.java'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Verify scan, Terminal and cPanel observability
+        run: python3 .github/scripts/verify_spam_control_observability_contract.py
