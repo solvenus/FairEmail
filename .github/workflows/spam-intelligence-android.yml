@@ -37,6 +37,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamIntentObserver.java'
       - 'app/src/main/java/eu/faircode/email/TupleAliasDomainStats.java'
       - 'app/src/main/java/eu/faircode/email/TupleSpamFamily*.java'
+      - '.github/scripts/verify_spam_intelligence_migration.py'
       - '.github/workflows/spam-intelligence-android.yml'
   workflow_dispatch:
 
@@ -61,6 +62,10 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
             :app:compileGithubDebugJavaWithJavac
+      - name: Verify SpamIntelligenceDB migration 8 to 9
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/verify_spam_intelligence_migration.py
       - name: Assemble GitHub debug APK
         run: |
           set -euo pipefail
