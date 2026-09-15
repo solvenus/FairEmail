@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
-"""Verify migration-created SpamIntelligenceDB tables against Room schemas.
+"""Verify migration-created SpamIntelligenceDB tables against Room's current schema.
 
 The script reads both sources of truth at runtime:
   * SQL statements are extracted from SpamIntelligenceDB.java.
-  * Expected table/index metadata is read from Room's generated schema JSON.
+  * Expected table/index metadata is read from Room's generated current schema JSON.
 
-This catches migration/entity drift without needing an emulator.
+A clean Room compile exports the current DB version only. Tables that were
+introduced by older migrations and remain unchanged are therefore checked
+against their current entity definition instead of requiring historical schema
+JSON files to be committed to the repository.
 """
 
 from __future__ import annotations
@@ -20,9 +23,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 JAVA = ROOT / "app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java"
 SCHEMA_ROOT = ROOT / "app/schemas"
+CURRENT_SCHEMA_VERSION = 10
 CASES = [
-    ("MIGRATION_8_9", 9, "spam_family_exclusion"),
-    ("MIGRATION_9_10", 10, "spam_action_history"),
+    ("MIGRATION_8_9", "spam_family_exclusion"),
+    ("MIGRATION_9_10", "spam_action_history"),
 ]
 
 
@@ -58,13 +62,13 @@ def extract_sql(migration: str) -> list[str]:
     return statements
 
 
-def find_room_entity(version: int, table: str) -> tuple[Path, dict]:
+def find_room_entity(table: str) -> tuple[Path, dict]:
     if not SCHEMA_ROOT.exists():
         fail(f"Room schema directory not generated: {SCHEMA_ROOT}")
 
-    candidates = sorted(SCHEMA_ROOT.rglob(f"{version}.json"))
+    candidates = sorted(SCHEMA_ROOT.rglob(f"{CURRENT_SCHEMA_VERSION}.json"))
     if not candidates:
-        fail(f"No Room v{version} schema JSON found after compilation")
+        fail(f"No Room v{CURRENT_SCHEMA_VERSION} schema JSON found after compilation")
 
     for path in candidates:
         try:
@@ -75,7 +79,7 @@ def find_room_entity(version: int, table: str) -> tuple[Path, dict]:
         for entity in database.get("entities", []):
             if entity.get("tableName") == table:
                 return path, entity
-    fail(f"Room v{version} schema found, but table {table!r} is missing")
+    fail(f"Room v{CURRENT_SCHEMA_VERSION} schema found, but table {table!r} is missing")
 
 
 def normalize_affinity(value: str | None) -> str:
@@ -91,9 +95,9 @@ def normalize_affinity(value: str | None) -> str:
     return "NUMERIC"
 
 
-def verify_case(migration: str, version: int, table: str) -> None:
+def verify_case(migration: str, table: str) -> None:
     statements = extract_sql(migration)
-    schema_path, entity = find_room_entity(version, table)
+    schema_path, entity = find_room_entity(table)
 
     db = sqlite3.connect(":memory:")
     try:
@@ -182,7 +186,7 @@ def verify_case(migration: str, version: int, table: str) -> None:
                 fail(f"{migration} index mismatch for {name}: actual={actual} expected={expected}")
 
         print(
-            f"PASS {migration}: {table} matches Room schema from "
+            f"PASS {migration}: {table} matches current Room schema from "
             f"{schema_path.relative_to(ROOT)}"
         )
         print(f"Executed {len(statements)} migration statements")
@@ -191,8 +195,8 @@ def verify_case(migration: str, version: int, table: str) -> None:
 
 
 def main() -> None:
-    for migration, version, table in CASES:
-        verify_case(migration, version, table)
+    for migration, table in CASES:
+        verify_case(migration, table)
 
 
 if __name__ == "__main__":
