@@ -5,10 +5,13 @@ on:
     branches:
       - feature/spam-families
     paths:
+      - 'app/src/main/java/eu/faircode/email/AliasDomainAffinity.java'
       - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
+      - 'app/src/main/java/eu/faircode/email/AliasSenderManager.java'
       - 'app/src/main/java/eu/faircode/email/DaoAlias.java'
       - 'app/src/main/java/eu/faircode/email/EntityAlias.java'
       - 'app/src/main/java/eu/faircode/email/EntityAliasDelivery.java'
+      - 'app/src/main/java/eu/faircode/email/EntitySpamMeta.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
