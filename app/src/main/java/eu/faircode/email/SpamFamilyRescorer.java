@@ -55,27 +55,65 @@ public final class SpamFamilyRescorer {
         executor.execute(() -> {
             try {
                 DaoSpamFamily dao = SpamIntelligenceDB.getInstance(app).family();
-                EntitySpamRescoreTask previous = dao.getRescoreTask(account, familyId);
-                long now = System.currentTimeMillis();
-                long generation = now;
-                if (previous != null && generation <= previous.requested_at)
-                    generation = previous.requested_at + 1L;
-
-                EntitySpamRescoreTask task = new EntitySpamRescoreTask();
-                task.account_uuid = account;
-                task.family_id = familyId;
-                task.before_message_id = Long.MAX_VALUE;
-                task.requested_at = generation;
-                task.updated_at = now;
-                dao.putRescoreTask(task);
-                Log.i("SpamFamily rescore queued account=" + account +
-                        " family=" + familyId + " generation=" + generation);
+                putTask(dao, account, familyId, System.currentTimeMillis());
             } catch (Throwable ex) {
                 Log.e(ex);
             } finally {
                 schedule(app, 0L);
             }
         });
+    }
+
+    /**
+     * Rare expensive path used after a family is deleted. All surviving active
+     * families are rescanned so messages formerly owned by the deleted family
+     * can immediately acquire their next-best observer prediction.
+     */
+    public static void enqueueAllActive(Context context, String accountUuid) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
+            return;
+        final Context app = context.getApplicationContext();
+        final String account = accountUuid.trim();
+        executor.execute(() -> {
+            try {
+                DaoSpamFamily dao = SpamIntelligenceDB.getInstance(app).family();
+                List<EntitySpamFamily> families = dao.getActiveFamilies(account);
+                long generationBase = System.currentTimeMillis();
+                if (families != null)
+                    for (int i = 0; i < families.size(); i++) {
+                        EntitySpamFamily family = families.get(i);
+                        if (family == null || family.id == null)
+                            continue;
+                        putTask(dao, account, family.id, generationBase + i);
+                    }
+                Log.i("SpamFamily full competition queued account=" + account +
+                        " families=" + (families == null ? 0 : families.size()));
+            } catch (Throwable ex) {
+                Log.e(ex);
+            } finally {
+                schedule(app, 0L);
+            }
+        });
+    }
+
+    private static void putTask(DaoSpamFamily dao,
+                                String account,
+                                long familyId,
+                                long requestedGeneration) {
+        EntitySpamRescoreTask previous = dao.getRescoreTask(account, familyId);
+        long generation = requestedGeneration;
+        if (previous != null && generation <= previous.requested_at)
+            generation = previous.requested_at + 1L;
+
+        EntitySpamRescoreTask task = new EntitySpamRescoreTask();
+        task.account_uuid = account;
+        task.family_id = familyId;
+        task.before_message_id = Long.MAX_VALUE;
+        task.requested_at = generation;
+        task.updated_at = System.currentTimeMillis();
+        dao.putRescoreTask(task);
+        Log.i("SpamFamily rescore queued account=" + account +
+                " family=" + familyId + " generation=" + generation);
     }
 
     private static void schedule(Context context, long delayMs) {
