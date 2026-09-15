@@ -6070,35 +6070,34 @@ public class FragmentCompose extends FragmentBase {
                                 }
                             }
 
-                            // Reply-time alias recovery v4
+                            // Reply-time alias authority v5
                             //
-                            // Older locally stored messages can predate alias/identity synchronization.
-                            // Reconstruct the delivery alias on demand when Reply is pressed instead of
-                            // requiring a mailbox-wide rewrite. Prefer FairEmail's stored Envelope-To,
-                            // then the original envelope headers, then visible recipients on this
-                            // identity's domain. Once resolved, repair this one historical message.
+                            // Old messages can contain both the service alias and a later routing alias.
+                            // The SMTP envelope recipient closest to the original delivery is authoritative:
+                            // Envelope-To > X-Envelope-To > X-Original-To > visible recipients > Delivered-To
+                            // > the legacy stored deliveredto value. This matters for forwarded/routed mail,
+                            // where Delivered-To can name an outer mailbox such as sd_1 while Envelope-To and
+                            // To still name the real service alias such as sd_notion.
                             String identityDomain = UriHelper.getEmailDomain(selected.email);
-                            String replyDeliveredTo = AliasRegistry.normalizeAddress(ref.deliveredto);
-                            if (!TextUtils.isEmpty(replyDeliveredTo) &&
-                                    !TextUtils.isEmpty(identityDomain) &&
-                                    !identityDomain.equalsIgnoreCase(UriHelper.getEmailDomain(replyDeliveredTo)))
-                                replyDeliveredTo = null;
+                            String originalDeliveredTo = AliasRegistry.normalizeAddress(ref.deliveredto);
+                            String replyDeliveredTo = null;
+                            String replyAliasSource = null;
+                            InternetHeaders storedHeaders = null;
 
-                            if (TextUtils.isEmpty(replyDeliveredTo) && !TextUtils.isEmpty(ref.headers))
+                            if (!TextUtils.isEmpty(ref.headers))
                                 try {
-                                    InternetHeaders storedHeaders = new InternetHeaders(
+                                    storedHeaders = new InternetHeaders(
                                             new ByteArrayInputStream(ref.headers.getBytes(StandardCharsets.UTF_8)), true);
-                                    String[] envelopeHeaders = new String[]{
-                                            "Envelope-To", "X-Envelope-To", "X-Original-To", "Delivered-To"};
-                                    for (String headerName : envelopeHeaders) {
+                                    String[] authoritativeHeaders = new String[]{
+                                            "Envelope-To", "X-Envelope-To", "X-Original-To"};
+                                    for (String headerName : authoritativeHeaders) {
                                         String value = storedHeaders.getHeader(headerName, null);
                                         String candidate = AliasRegistry.normalizeAddress(value);
                                         if (!TextUtils.isEmpty(candidate) &&
                                                 !TextUtils.isEmpty(identityDomain) &&
                                                 identityDomain.equalsIgnoreCase(UriHelper.getEmailDomain(candidate))) {
                                             replyDeliveredTo = candidate;
-                                            EntityLog.log(context, "Recovered historical reply alias from " +
-                                                    headerName + "=" + candidate);
+                                            replyAliasSource = headerName;
                                             break;
                                         }
                                     }
@@ -6106,13 +6105,18 @@ public class FragmentCompose extends FragmentBase {
                                     Log.w(ex);
                                 }
 
+                            // Original visible recipients are stronger evidence than Delivered-To because
+                            // Delivered-To can be rewritten by a later local forward/transport hop.
                             if (TextUtils.isEmpty(replyDeliveredTo) && !TextUtils.isEmpty(identityDomain)) {
                                 Address[][] recipientGroups = new Address[][]{ref.to, ref.bcc, ref.cc};
+                                String[] recipientNames = new String[]{"To", "Bcc", "Cc"};
                                 String identityAddress = AliasRegistry.normalizeAddress(selected.email);
                                 String sameAddressCandidate = null;
+                                String sameAddressSource = null;
 
                                 recipientSearch:
-                                for (Address[] recipients : recipientGroups) {
+                                for (int group = 0; group < recipientGroups.length; group++) {
+                                    Address[] recipients = recipientGroups[group];
                                     if (recipients == null)
                                         continue;
                                     for (Address recipient : recipients) {
@@ -6126,30 +6130,60 @@ public class FragmentCompose extends FragmentBase {
 
                                         if (identityAddress == null || !candidate.equalsIgnoreCase(identityAddress)) {
                                             replyDeliveredTo = candidate;
+                                            replyAliasSource = recipientNames[group];
                                             break recipientSearch;
                                         }
-                                        if (sameAddressCandidate == null)
+                                        if (sameAddressCandidate == null) {
                                             sameAddressCandidate = candidate;
+                                            sameAddressSource = recipientNames[group];
+                                        }
                                     }
                                 }
 
-                                if (TextUtils.isEmpty(replyDeliveredTo))
+                                if (TextUtils.isEmpty(replyDeliveredTo)) {
                                     replyDeliveredTo = sameAddressCandidate;
+                                    replyAliasSource = sameAddressSource;
+                                }
+                            }
 
-                                if (!TextUtils.isEmpty(replyDeliveredTo))
-                                    EntityLog.log(context, "Recovered historical reply alias from recipients=" +
-                                            replyDeliveredTo);
+                            // Delivered-To is intentionally late. It often identifies the final local
+                            // transport target rather than the alias the sender addressed.
+                            if (TextUtils.isEmpty(replyDeliveredTo) && storedHeaders != null)
+                                try {
+                                    String candidate = AliasRegistry.normalizeAddress(
+                                            storedHeaders.getHeader("Delivered-To", null));
+                                    if (!TextUtils.isEmpty(candidate) &&
+                                            !TextUtils.isEmpty(identityDomain) &&
+                                            identityDomain.equalsIgnoreCase(UriHelper.getEmailDomain(candidate))) {
+                                        replyDeliveredTo = candidate;
+                                        replyAliasSource = "Delivered-To";
+                                    }
+                                } catch (Throwable ex) {
+                                    Log.w(ex);
+                                }
+
+                            if (TextUtils.isEmpty(replyDeliveredTo) &&
+                                    !TextUtils.isEmpty(originalDeliveredTo) &&
+                                    !TextUtils.isEmpty(identityDomain) &&
+                                    identityDomain.equalsIgnoreCase(UriHelper.getEmailDomain(originalDeliveredTo))) {
+                                replyDeliveredTo = originalDeliveredTo;
+                                replyAliasSource = "stored-deliveredto";
                             }
 
                             if (!TextUtils.isEmpty(replyDeliveredTo)) {
-                                boolean recovered = TextUtils.isEmpty(ref.deliveredto);
+                                boolean repaired = TextUtils.isEmpty(originalDeliveredTo) ||
+                                        !replyDeliveredTo.equalsIgnoreCase(originalDeliveredTo);
                                 ref.deliveredto = replyDeliveredTo;
 
-                                if (recovered && ref.id != null)
+                                if (repaired && ref.id != null)
                                     db.getOpenHelper().getWritableDatabase().execSQL(
-                                            "UPDATE message SET deliveredto = ?" +
-                                                    " WHERE id = ? AND (deliveredto IS NULL OR TRIM(deliveredto) = '')",
+                                            "UPDATE message SET deliveredto = ? WHERE id = ?",
                                             new Object[]{replyDeliveredTo, ref.id});
+
+                                EntityLog.log(context, "Reply alias authority source=" + replyAliasSource +
+                                        " alias=" + replyDeliveredTo +
+                                        " previous=" + originalDeliveredTo +
+                                        " repaired=" + repaired);
 
                                 if (ref.folder != null) {
                                     EntityAccount refAccount = db.account().getAccount(ref.account);
