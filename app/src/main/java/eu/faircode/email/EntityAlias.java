@@ -27,7 +27,8 @@ import androidx.room.PrimaryKey;
                 @Index(value = {"account_uuid"}),
                 @Index(value = {"account_uuid", "address"}, unique = true),
                 @Index(value = {"last_seen"}),
-                @Index(value = {"spam_hits"})
+                @Index(value = {"spam_hits"}),
+                @Index(value = {"service_domain"})
         }
 )
 public class EntityAlias {
@@ -45,12 +46,26 @@ public class EntityAlias {
     @NonNull
     public String account_uuid;
 
-    /** Canonical lowercase envelope recipient, for example sd_service@example.org. */
+    /** Canonical envelope recipient, for example sd_service@example.org. */
     @NonNull
     public String address;
 
     /** Optional human label. Can initially be inferred from sd_<service>@... conventions. */
     public String service;
+
+    /**
+     * Canonical registrable domain this alias is intended to represent, when known.
+     * This can be auto-inferred from a strong alias/domain match and edited by the user.
+     */
+    public String service_domain;
+
+    /** All observed sender root domains and counts. Observation does not imply trust. */
+    @NonNull
+    public String observed_domains = "{}";
+
+    /** User-approved/learned trusted sender root domains. Stored as a JSON array. */
+    @NonNull
+    public String trusted_domains = "[]";
 
     @NonNull
     public Integer state = STATE_ACTIVE;
