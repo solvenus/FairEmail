@@ -84,6 +84,7 @@ public class ActivitySpamControl extends ActivityBase {
     private final Map<Long, String> familyDescriptors = new HashMap<>();
     private List<SpamNetworkAnalyzer.Network> networks = Collections.emptyList();
     private List<EntitySpamActionHistory> recentActions = Collections.emptyList();
+    private SpamControlAttentionStats.Stats attentionStats = SpamControlAttentionStats.EMPTY;
 
     private Spinner spAccount;
     private TextView tvStatus;
@@ -367,9 +368,16 @@ public class ActivitySpamControl extends ActivityBase {
             spamHits += alias.spam_hits == null ? 0 : alias.spam_hits;
         }
 
-        llPage.addView(statCard("Trenger deg", String.valueOf(reviewCount),
-                "meldinger i arbeidskøen", "Gjennomgå nå",
-                v -> setSection(Section.REVIEW)), matchWrapWithMargin(0, 0, 0, 8));
+        int actualNeeds = reviewCount + attentionStats.actualNeedsBeyondMail();
+        String needsDetail = reviewCount + " meldinger · " +
+                attentionStats.compromiseDecisions + " aliasavgjørelser · " +
+                attentionStats.serverFailures + " serverfeil";
+        llPage.addView(statCard("Trenger deg", String.valueOf(actualNeeds),
+                needsDetail, actualNeeds == 0 ? null :
+                        (reviewCount > 0 ? "Gjennomgå nå" : "Se aliaser"),
+                actualNeeds == 0 ? null :
+                        (reviewCount > 0 ? v -> setSection(Section.REVIEW) : v -> setSection(Section.ALIASES))),
+                matchWrapWithMargin(0, 0, 0, 8));
         llPage.addView(statCard("Kompromitterte aliaser", String.valueOf(compromised),
                 replacementsMissing + " mangler replacement", "Se aliaser",
                 v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 8));
@@ -377,24 +385,45 @@ public class ActivitySpamControl extends ActivityBase {
                 families.size() + " spamidentiteter · " + smtpDead + " SMTP-døde aliaser", null, null),
                 matchWrapWithMargin(0, 0, 0, 12));
 
-        llPage.addView(sectionTitle("Trenger oppmerksomhet"), matchWrap());
+        llPage.addView(sectionTitle("Trenger deg"), matchWrap());
         if (reviewCount > 0)
             llPage.addView(attentionCard(reviewCount + " meldinger trenger vurdering",
-                    "Spamkontroll har samlet det som faktisk trenger et menneske.",
+                    "Dette er faktiske Spam/Ikke spam-beslutninger.",
                     "Start", v -> setSection(Section.REVIEW)), matchWrapWithMargin(0, 6, 0, 6));
-        if (replacementsMissing > 0)
-            llPage.addView(attentionCard(replacementsMissing + " kompromitterte aliaser mangler replacement",
-                    "Replacement anbefales før SMTP-burn, men du kan overstyre dette.",
-                    "Åpne", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
-        if (!SpamControlPolicy.hasCpanelConfig(this))
-            llPage.addView(attentionCard("cPanel er ikke konfigurert",
-                    "Aliasstyring virker lokalt. Server-side hard reject krever cPanel-konfigurasjon.",
-                    "Konfigurer", v -> showCpanelDialog()), matchWrapWithMargin(0, 0, 0, 10));
-        if (reviewCount == 0 && replacementsMissing == 0 && SpamControlPolicy.hasCpanelConfig(this)) {
-            TextView done = bodyText("✓ Ingen ting krever oppmerksomhet akkurat nå.");
+        if (attentionStats.compromiseDecisions > 0)
+            llPage.addView(attentionCard(attentionStats.compromiseDecisions +
+                            " aliaser trenger kompromissavgjørelse",
+                    "Spam finnes, men appen kan ikke avgjøre alias-lekkasjen uten deg.",
+                    "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+        if (attentionStats.serverFailures > 0)
+            llPage.addView(attentionCard(attentionStats.serverFailures + " SMTP-operasjoner feilet",
+                    "Serverhandlingen trenger inspeksjon eller nytt forsøk.",
+                    "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+        if (actualNeeds == 0) {
+            TextView done = bodyText("✓ Ingen uløste beslutninger eller feil akkurat nå.");
             done.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
             done.setPadding(0, dp(8), 0, dp(12));
             llPage.addView(done, matchWrap());
+        }
+
+        int recommendations = attentionStats.recommendations() +
+                (SpamControlPolicy.hasCpanelConfig(this) ? 0 : 1);
+        if (recommendations > 0) {
+            llPage.addView(sectionTitle("Anbefalt"), matchWrapWithMargin(0, 10, 0, 0));
+            if (attentionStats.replacementMissingRecommendations > 0)
+                llPage.addView(attentionCard(attentionStats.replacementMissingRecommendations +
+                                " kompromitterte aliaser mangler replacement",
+                        "Anbefalt før SMTP-burn. Dette sperrer deg ikke.",
+                        "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 6, 0, 6));
+            if (attentionStats.replacementUnverifiedRecommendations > 0)
+                llPage.addView(attentionCard(attentionStats.replacementUnverifiedRecommendations +
+                                " replacements kan verifiseres",
+                        "Verifisering gir mer sikkerhet, men er ikke nødvendig for burn.",
+                        "Se aliaser", v -> setSection(Section.ALIASES)), matchWrapWithMargin(0, 0, 0, 6));
+            if (!SpamControlPolicy.hasCpanelConfig(this))
+                llPage.addView(attentionCard("cPanel er ikke konfigurert",
+                        "Konfigurer dette når du vil bruke server-side SMTP hard reject.",
+                        "Konfigurer", v -> showCpanelDialog()), matchWrapWithMargin(0, 0, 0, 10));
         }
 
         llPage.addView(sectionTitle("Automatikk"), matchWrapWithMargin(0, 8, 0, 0));
@@ -426,6 +455,7 @@ public class ActivitySpamControl extends ActivityBase {
         executor.execute(() -> {
             List<SpamNetworkAnalyzer.Network> loadedNetworks;
             List<EntitySpamActionHistory> loadedActions;
+            SpamControlAttentionStats.Stats loadedAttention;
             try {
                 loadedNetworks = SpamNetworkAnalyzer.analyze(getApplicationContext(), account.uuid);
             } catch (Throwable ex) {
@@ -441,13 +471,22 @@ public class ActivitySpamControl extends ActivityBase {
                 Log.e(ex);
                 loadedActions = Collections.emptyList();
             }
+            try {
+                loadedAttention = SpamControlAttentionStats.compute(
+                        getApplicationContext(), account.uuid);
+            } catch (Throwable ex) {
+                Log.e(ex);
+                loadedAttention = SpamControlAttentionStats.EMPTY;
+            }
             final List<SpamNetworkAnalyzer.Network> safeNetworks = loadedNetworks;
             final List<EntitySpamActionHistory> safeActions = loadedActions;
+            final SpamControlAttentionStats.Stats safeAttention = loadedAttention;
             runOnUiThread(() -> {
                 if (!isSelected(account) || isFinishing() || isDestroyed())
                     return;
                 networks = safeNetworks;
                 recentActions = safeActions;
+                attentionStats = safeAttention;
                 if (section == Section.OVERVIEW || section == Section.FAMILIES ||
                         section == Section.SETTINGS)
                     renderCurrent();
@@ -466,6 +505,7 @@ public class ActivitySpamControl extends ActivityBase {
         }
         executor.execute(() -> {
             List<SpamFamilyLabRepository.Candidate> result;
+            int total;
             try {
                 result = SpamFamilyLabRepository.getReviewQueue(
                         getApplicationContext(), account.uuid, REVIEW_LIMIT);
@@ -473,14 +513,22 @@ public class ActivitySpamControl extends ActivityBase {
                 Log.e(ex);
                 result = Collections.emptyList();
             }
+            try {
+                total = SpamControlQueueStats.countReview(
+                        getApplicationContext(), account.uuid);
+            } catch (Throwable ex) {
+                Log.e(ex);
+                total = result.size();
+            }
             final List<SpamFamilyLabRepository.Candidate> queue = result;
+            final int exactTotal = Math.max(queue.size(), total);
             runOnUiThread(() -> {
                 if (generation != reviewGeneration.get() || !isSelected(account) ||
                         isFinishing() || isDestroyed())
                     return;
                 reviewLoading = false;
                 reviewQueue = new ArrayList<>(queue);
-                reviewCount = reviewQueue.size();
+                reviewCount = exactTotal;
                 if (reviewIndex >= reviewQueue.size())
                     reviewIndex = 0;
                 if (section == Section.REVIEW || section == Section.OVERVIEW)
@@ -672,7 +720,7 @@ public class ActivitySpamControl extends ActivityBase {
                     if (SpamControlPolicy.autoAdvance(this) &&
                             reviewIndex < reviewQueue.size())
                         reviewQueue.remove(reviewIndex);
-                    reviewCount = reviewQueue.size();
+                    reviewCount = Math.max(0, reviewCount - 1);
                     if (reviewIndex >= reviewQueue.size())
                         reviewIndex = 0;
                     renderCurrent();
