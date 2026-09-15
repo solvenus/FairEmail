@@ -20,7 +20,8 @@ public final class SpamExactBulkPropagator {
     public static Result propagate(Context context,
                                    EntityAccount account,
                                    EntityMessage seed,
-                                   long familyId) {
+                                   long familyId,
+                                   String seedAlias) {
         if (context == null || account == null || account.uuid == null ||
                 seed == null || seed.id == null || familyId <= 0)
             return Result.NONE;
@@ -33,8 +34,10 @@ public final class SpamExactBulkPropagator {
         DaoAlias aliasDao = SpamIntelligenceDB.getInstance(context).alias();
         DB mail = DB.getInstance(context);
         long afterMessageId = 0L;
-        int changed = 0;
+        int messages = 1;
         Set<String> touchedAliases = new HashSet<>();
+        if (seedAlias != null)
+            touchedAliases.add(seedAlias);
 
         while (true) {
             List<EntityAliasDelivery> page = aliasDao.getUnknownDeliveriesAfter(
@@ -66,8 +69,9 @@ public final class SpamExactBulkPropagator {
                     if (after != null &&
                             after.label == EntityAliasDelivery.LABEL_SPAM &&
                             after.family_id != null && after.family_id == familyId) {
-                        changed++;
-                        touchedAliases.add(after.address);
+                        messages++;
+                        if (after.address != null)
+                            touchedAliases.add(after.address);
                     }
                 } catch (Throwable ex) {
                     // One malformed/missing retained message must not prevent the
@@ -80,17 +84,17 @@ public final class SpamExactBulkPropagator {
                 break;
         }
 
-        return new Result(changed, touchedAliases.size());
+        return new Result(messages, touchedAliases.size());
     }
 
     public static final class Result {
         static final Result NONE = new Result(0, 0);
-        public final int additionalMessages;
-        public final int additionalAliases;
+        public final int messages;
+        public final int aliases;
 
-        Result(int additionalMessages, int additionalAliases) {
-            this.additionalMessages = Math.max(0, additionalMessages);
-            this.additionalAliases = Math.max(0, additionalAliases);
+        Result(int messages, int aliases) {
+            this.messages = Math.max(0, messages);
+            this.aliases = Math.max(0, aliases);
         }
     }
 }
