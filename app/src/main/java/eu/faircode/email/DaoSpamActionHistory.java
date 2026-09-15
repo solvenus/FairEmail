@@ -13,6 +13,8 @@ import androidx.room.Dao;
 import androidx.room.Insert;
 import androidx.room.Query;
 
+import java.util.List;
+
 @Dao
 public interface DaoSpamActionHistory {
     @Insert
@@ -27,6 +29,15 @@ public interface DaoSpamActionHistory {
             " WHERE account_uuid = :accountUuid AND undone_at IS NULL" +
             " ORDER BY id DESC LIMIT 1")
     EntitySpamActionHistory getLatestUndoable(String accountUuid);
+
+    @Query("SELECT * FROM spam_action_history" +
+            " ORDER BY id DESC LIMIT :limit")
+    List<EntitySpamActionHistory> getRecent(int limit);
+
+    @Query("SELECT * FROM spam_action_history" +
+            " WHERE account_uuid = :accountUuid" +
+            " ORDER BY id DESC LIMIT :limit")
+    List<EntitySpamActionHistory> getRecent(String accountUuid, int limit);
 
     @Query("SELECT * FROM spam_action_history WHERE id = :id LIMIT 1")
     EntitySpamActionHistory get(long id);
