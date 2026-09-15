@@ -94,7 +94,18 @@ public final class CpanelForwarderTransactionLab {
         require(noChange.success && !noChange.changed && alreadyDead.deleteCalls == 0,
                 "already-dead alias must be no-op");
 
-        System.out.println("PASS cpanel-transaction safeBurn+restore+rollback+unsafeVeto+pipe");
+        FakeBackend mixedFail = new FakeBackend(
+                ":fail: Existing reject", "still-forwarded@example.net");
+        CpanelForwarderTransaction.Result mixed = CpanelForwarderTransaction.burn(
+                mixedFail, address, "dead", home, false);
+        require(mixed.success && mixed.changed,
+                "mixed fail+forward must be replaced, not accepted as already dead");
+        require(mixedFail.routes.size() == 1 && mixedFail.routes.get(0).startsWith(":fail:"),
+                "mixed fail+forward must end as pure fail route");
+        require(mixedFail.deleteCalls == 2,
+                "mixed fail+forward must delete every pre-existing route");
+
+        System.out.println("PASS cpanel-transaction safeBurn+restore+rollback+unsafeVeto+pipe+pureFail");
     }
 
     private static final class FakeBackend implements CpanelForwarderTransaction.Backend {

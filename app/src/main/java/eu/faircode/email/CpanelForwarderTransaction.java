@@ -68,7 +68,10 @@ public final class CpanelForwarderTransaction {
                     Collections.<String>emptyList(), Collections.<String>emptyList());
         }
 
-        if (containsFail(before))
+        // A mixed fail + forwarding route set is not a proven hard reject.
+        // Only a pure fail route is already SMTP-dead; mixed routes must be
+        // transactionally replaced and read back as pure fail.
+        if (isPureFail(before))
             return new Result(true, false, false, false, false, null, before, before);
 
         String unsafe = firstUnrestorable(before, homeDirectory);
