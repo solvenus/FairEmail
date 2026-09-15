@@ -19,6 +19,23 @@ public final class SpamIntelligence {
     private SpamIntelligence() {
     }
 
+    /**
+     * Convenience ingress for existing FairEmail paths that only have a
+     * message/folder pair. Account UUID is resolved from FairEmail's main DB.
+     */
+    public static void observeMessage(Context context,
+                                      EntityFolder folder,
+                                      EntityMessage message) {
+        try {
+            if (context == null || folder == null || message == null || message.account == null)
+                return;
+            EntityAccount account = DB.getInstance(context).account().getAccount(message.account);
+            observeMessage(context, account, folder, message);
+        } catch (Throwable ex) {
+            Log.e(ex);
+        }
+    }
+
     /** Record envelope-alias metadata once the FairEmail message has a DB id. */
     public static void observeMessage(Context context,
                                       EntityAccount account,
