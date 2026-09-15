@@ -101,6 +101,7 @@ public class ActivitySpamControl extends ActivityBase {
     private List<EntityAlias> aliases = Collections.emptyList();
 
     private List<SpamFamilyLabRepository.Candidate> reviewQueue = new ArrayList<>();
+    private int aliasBucketSelection = 0; // 0=spam/problem, 1=legitimate, 2=unresolved
     private int reviewIndex = 0;
     private boolean reviewLoading = false;
     private int reviewCount = 0;
@@ -736,44 +737,88 @@ public class ActivitySpamControl extends ActivityBase {
 
     private void renderAliases() {
         llPage.addView(sectionTitle("Aliaser"), matchWrap());
-        TextView intro = bodyText("Legitime aliaser og spam-/kompromitterte aliaser holdes i separate arbeidsflater. Uavklarte aliaser ligger for seg selv.");
+        TextView intro = bodyText("Spam-/kompromitterte, legitime og uavklarte aliaser er separate arbeidsflater. Kun én liste vises om gangen.");
         intro.setPadding(0, dp(2), 0, dp(8));
         llPage.addView(intro, matchWrap());
 
         EditText search = new EditText(this);
         search.setSingleLine(true);
-        search.setHint("Søk alias eller tjeneste");
-        llPage.addView(search, matchWrapWithMargin(0, 0, 0, 10));
+        search.setHint("Søk i valgt aliasgruppe");
+        llPage.addView(search, matchWrapWithMargin(0, 0, 0, 8));
 
-        LinearLayout spamList = new LinearLayout(this);
-        spamList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout legitList = new LinearLayout(this);
-        legitList.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout unresolvedList = new LinearLayout(this);
-        unresolvedList.setOrientation(LinearLayout.VERTICAL);
+        LinearLayout bucketRow = new LinearLayout(this);
+        bucketRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button spam = secondaryButton("Spam / kompromitterte (" + countAliasBucket(0) + ")");
+        Button legit = secondaryButton("Legitime (" + countAliasBucket(1) + ")");
+        Button unresolved = secondaryButton("Uavklarte (" + countAliasBucket(2) + ")");
+        bucketRow.addView(spam, weightedButton());
+        bucketRow.addView(legit, weightedButton());
+        bucketRow.addView(unresolved, weightedButton());
+        llPage.addView(bucketRow, matchWrapWithMargin(0, 0, 0, 8));
 
-        llPage.addView(sectionTitleSmall("Spam / kompromitterte"), matchWrapWithMargin(0, 6, 0, 4));
-        llPage.addView(spamList, matchWrap());
-        llPage.addView(sectionTitleSmall("Legitime"), matchWrapWithMargin(0, 14, 0, 4));
-        llPage.addView(legitList, matchWrap());
-        llPage.addView(sectionTitleSmall("Uavklarte"), matchWrapWithMargin(0, 14, 0, 4));
-        llPage.addView(unresolvedList, matchWrap());
+        TextView description = bodyText("");
+        description.setPadding(0, 0, 0, dp(7));
+        llPage.addView(description, matchWrap());
 
-        Runnable repopulate = () -> {
-            String query = search.getText().toString();
-            populateAliasBucket(spamList, query, 0,
-                    "Ingen spam-/kompromitterte aliaser matcher søket.");
-            populateAliasBucket(legitList, query, 1,
-                    "Ingen legitime aliaser matcher søket.");
-            populateAliasBucket(unresolvedList, query, 2,
-                    "Ingen uavklarte aliaser matcher søket.");
+        LinearLayout list = new LinearLayout(this);
+        list.setOrientation(LinearLayout.VERTICAL);
+        llPage.addView(list, matchWrap());
+
+        final Button[] buttons = {spam, legit, unresolved};
+        final Runnable[] repopulate = new Runnable[1];
+        repopulate[0] = () -> {
+            for (int i = 0; i < buttons.length; i++) {
+                boolean active = i == aliasBucketSelection;
+                buttons[i].setTypeface(Typeface.DEFAULT, active ? Typeface.BOLD : Typeface.NORMAL);
+                buttons[i].setAlpha(active ? 1f : 0.62f);
+            }
+            description.setText(aliasBucketDescription(aliasBucketSelection));
+            populateAliasBucket(list, search.getText().toString(), aliasBucketSelection,
+                    aliasBucketEmptyText(aliasBucketSelection));
         };
+
+        spam.setOnClickListener(v -> {
+            aliasBucketSelection = 0;
+            repopulate[0].run();
+        });
+        legit.setOnClickListener(v -> {
+            aliasBucketSelection = 1;
+            repopulate[0].run();
+        });
+        unresolved.setOnClickListener(v -> {
+            aliasBucketSelection = 2;
+            repopulate[0].run();
+        });
         search.addTextChangedListener(new TextWatcher() {
             @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) { }
-            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { repopulate.run(); }
+            @Override public void onTextChanged(CharSequence s, int start, int before, int count) { repopulate[0].run(); }
             @Override public void afterTextChanged(Editable s) { }
         });
-        repopulate.run();
+        repopulate[0].run();
+    }
+
+    private int countAliasBucket(int bucket) {
+        int count = 0;
+        for (EntityAlias alias : aliases)
+            if (alias != null && aliasBucket(alias) == bucket)
+                count++;
+        return count;
+    }
+
+    private String aliasBucketDescription(int bucket) {
+        if (bucket == 0)
+            return "Spamtrafikk, kompromitterte/erstattede aliaser og SMTP-styrte aliaser.";
+        if (bucket == 1)
+            return "Aktive aliaser med legitim historikk og uten spamtrafikk.";
+        return "Aliaser som ennå ikke har nok menneskelig læring til å være legitime eller spamrammede.";
+    }
+
+    private String aliasBucketEmptyText(int bucket) {
+        if (bucket == 0)
+            return "Ingen spam-/kompromitterte aliaser matcher søket.";
+        if (bucket == 1)
+            return "Ingen legitime aliaser matcher søket.";
+        return "Ingen uavklarte aliaser matcher søket.";
     }
 
     private void populateAliasBucket(LinearLayout list, String query, int bucket, String emptyText) {
