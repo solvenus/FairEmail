@@ -29,6 +29,7 @@ public final class SpamIntelligence {
                 return;
 
             SpamIntentObserver.start(context);
+            SpamFamilyRescorer.start(context);
             AliasBackfill.schedule(context);
 
             if (folder == null || message == null || message.account == null ||
@@ -52,6 +53,7 @@ public final class SpamIntelligence {
                 return;
 
             SpamIntentObserver.start(context);
+            SpamFamilyRescorer.start(context);
 
             AliasDomainAffinity.Evidence evidence = AliasDomainAffinity.fromMessage(context, message);
             SpamAliasStore.observeDelivery(
@@ -181,7 +183,8 @@ public final class SpamIntelligence {
                     message.id == null || account.uuid == null)
                 return;
 
-            DaoAlias dao = SpamIntelligenceDB.getInstance(context).alias();
+            SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+            DaoAlias dao = intelligence.alias();
 
             EntityAliasDelivery before = dao.getDelivery(account.uuid, message.id);
             if (before == null && message.folder != null && message.deliveredto != null) {
@@ -223,11 +226,18 @@ public final class SpamIntelligence {
                 return;
             }
 
-            if (label == EntityAliasDelivery.LABEL_SPAM && familyId != null)
+            Long changedFamily = null;
+            if (label == EntityAliasDelivery.LABEL_SPAM && familyId != null) {
                 SpamFamilyStore.reconcileFamily(context, familyId);
-            else if (before.label == EntityAliasDelivery.LABEL_SPAM)
-                SpamFamilyStore.unlearnMessage(
+                if (familyLearn != null && familyLearn.learned)
+                    changedFamily = familyId;
+            } else if (before.label == EntityAliasDelivery.LABEL_SPAM) {
+                changedFamily = SpamFamilyStore.unlearnMessage(
                         context, account.uuid, message.id, before.family_id);
+            }
+
+            if (changedFamily != null && intelligence.family().getFamily(changedFamily) != null)
+                SpamFamilyRescorer.enqueue(context, account.uuid, changedFamily);
 
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
