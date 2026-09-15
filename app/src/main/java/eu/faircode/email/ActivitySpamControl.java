@@ -814,8 +814,8 @@ public class ActivitySpamControl extends ActivityBase {
         if (bucket == 0)
             return "Spamtrafikk, kompromitterte/erstattede aliaser og SMTP-styrte aliaser.";
         if (bucket == 1)
-            return "Aktive aliaser med legitim historikk og uten spamtrafikk.";
-        return "Aliaser som ennå ikke har nok menneskelig læring til å være legitime eller spamrammede.";
+            return "Aktive aliaser med Innboks-trafikk eller eksplisitt Ikke spam, uten spam/problemstate.";
+        return "Aliaser som foreløpig mangler nok sunn trafikk eller spam-evidens til å plasseres sikkert.";
     }
 
     private String aliasBucketEmptyText(int bucket) {
@@ -857,10 +857,23 @@ public class ActivitySpamControl extends ActivityBase {
                 smtp != EntityAlias.SMTP_REJECT_NONE)
             return 0;
 
-        if (alias.state == EntityAlias.STATE_ACTIVE && ham > 0)
+        if (alias.state == EntityAlias.STATE_ACTIVE &&
+                (ham > 0 || aliasHasInboxTraffic(alias)))
             return 1;
 
         return 2;
+    }
+
+    private boolean aliasHasInboxTraffic(EntityAlias alias) {
+        if (alias == null || TextUtils.isEmpty(alias.folder_counts))
+            return false;
+        try {
+            org.json.JSONObject counts = new org.json.JSONObject(alias.folder_counts);
+            return counts.optInt(EntityFolder.INBOX, 0) > 0;
+        } catch (Throwable ex) {
+            Log.w(ex);
+            return false;
+        }
     }
 
     private View aliasCard(EntityAlias alias) {
