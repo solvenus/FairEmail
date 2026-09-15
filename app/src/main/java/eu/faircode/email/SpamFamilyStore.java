@@ -116,25 +116,37 @@ public final class SpamFamilyStore {
         }
 
         prune(dao, familyId);
-        refreshFamilyStats(dao, familyId, now);
+
+        // The ledger label is written immediately after this call. Keep the new
+        // family alive provisionally; reconcileFamily() replaces this value with
+        // the real lifetime confirmed count once the label commit succeeds.
+        int confirmed = dao.countConfirmedMembers(familyId);
+        dao.setFamilyStats(familyId, Math.max(1, confirmed), now);
         return new LearnResult(familyId, created, true, best.score);
     }
 
     public static synchronized Long unlearnMessage(Context context,
                                                    String accountUuid,
-                                                   long messageId) {
+                                                   long messageId,
+                                                   Long familyHint) {
         if (context == null || accountUuid == null || messageId <= 0)
-            return null;
+            return familyHint;
 
         DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
         EntitySpamFamilyExemplar exemplar = dao.getExemplar(accountUuid, messageId);
-        if (exemplar == null)
-            return null;
-
-        long familyId = exemplar.family_id;
-        dao.deleteExemplarByMessage(accountUuid, messageId);
-        refreshFamilyStats(dao, familyId, System.currentTimeMillis());
+        Long familyId = exemplar == null ? familyHint : exemplar.family_id;
+        if (exemplar != null)
+            dao.deleteExemplarByMessage(accountUuid, messageId);
+        if (familyId != null)
+            reconcileFamily(dao, familyId, System.currentTimeMillis());
         return familyId;
+    }
+
+    public static synchronized void reconcileFamily(Context context, Long familyId) {
+        if (context == null || familyId == null)
+            return;
+        reconcileFamily(SpamIntelligenceDB.getInstance(context).family(),
+                familyId, System.currentTimeMillis());
     }
 
     private static Best findBest(DaoSpamFamily dao,
@@ -186,12 +198,13 @@ public final class SpamFamilyStore {
         }
     }
 
-    private static void refreshFamilyStats(DaoSpamFamily dao, long familyId, long now) {
-        int count = dao.countExemplars(familyId);
-        if (count <= 0)
+    private static void reconcileFamily(DaoSpamFamily dao, long familyId, long now) {
+        int confirmed = dao.countConfirmedMembers(familyId);
+        if (confirmed <= 0) {
+            dao.deleteExemplars(familyId);
             dao.deleteFamily(familyId);
-        else
-            dao.setFamilyStats(familyId, count, now);
+        } else
+            dao.setFamilyStats(familyId, confirmed, now);
     }
 
     private static final class Best {
