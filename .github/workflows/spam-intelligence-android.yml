@@ -1,4 +1,4 @@
-# Gate trigger: hardened Spam Control runtime semantics
+# Gate trigger: alias separation and SMTP veto UX
 name: Spam Intelligence Android Compile
 
 on:
