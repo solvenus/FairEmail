@@ -28,7 +28,8 @@ import androidx.room.Index;
                 @Index(value = {"received"}),
                 @Index(value = {"label"}),
                 @Index(value = {"family_id"}),
-                @Index(value = {"sender_domain"})
+                @Index(value = {"sender_domain"}),
+                @Index(value = {"traffic_verdict"})
         }
 )
 public class EntityAliasDelivery {
@@ -62,4 +63,13 @@ public class EntityAliasDelivery {
 
     /** Learned spam-family id, when a family match/label exists. */
     public Long family_id;
+
+    /** Snapshot of the explainable alias/domain assessment at assessment time. */
+    public Double spam_support;
+    public Double ham_support;
+    public Double traffic_net;
+    public String traffic_verdict;
+    /** JSON array of stable reason identifiers from AliasTrafficScorer. */
+    public String traffic_reasons;
+    public Long assessed_at;
 }
