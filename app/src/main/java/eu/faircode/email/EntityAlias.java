@@ -9,31 +9,23 @@ package eu.faircode.email;
     (at your option) any later version.
 */
 
-import static androidx.room.ForeignKey.CASCADE;
-
 import androidx.annotation.NonNull;
 import androidx.room.Entity;
-import androidx.room.ForeignKey;
 import androidx.room.Index;
 import androidx.room.PrimaryKey;
 
 /**
  * Persistent inventory entry for an SMTP delivery alias observed by FairEmail.
  *
- * The identity is account + normalized envelope address. This is deliberately
- * independent from spam classification: every received message can contribute
- * to this inventory, while spam reputation and family membership are metadata
- * attached to the alias.
+ * This entity belongs to the isolated SpamIntelligenceDB, not FairEmail's main
+ * mail database. Account UUID is therefore the stable logical owner key and no
+ * cross-database foreign key is used.
  */
 @Entity(
         tableName = EntityAlias.TABLE_NAME,
-        foreignKeys = {
-                @ForeignKey(childColumns = "account", entity = EntityAccount.class,
-                        parentColumns = "id", onDelete = CASCADE)
-        },
         indices = {
-                @Index(value = {"account"}),
-                @Index(value = {"account", "address"}, unique = true),
+                @Index(value = {"account_uuid"}),
+                @Index(value = {"account_uuid", "address"}, unique = true),
                 @Index(value = {"last_seen"}),
                 @Index(value = {"spam_hits"})
         }
@@ -49,8 +41,9 @@ public class EntityAlias {
     @PrimaryKey(autoGenerate = true)
     public Long id;
 
+    /** Stable FairEmail account UUID. */
     @NonNull
-    public Long account;
+    public String account_uuid;
 
     /** Canonical lowercase envelope recipient, for example sd_service@example.org. */
     @NonNull
