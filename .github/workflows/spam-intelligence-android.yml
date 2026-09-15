@@ -1,4 +1,4 @@
-# Gate trigger: combined Spam Control P0 after veto, alias separation, compromise truth and undo
+# Gate trigger: truthful alias buckets + veto/control-integrity hardening
 name: Spam Intelligence Android Compile
 
 on:
