@@ -61,14 +61,14 @@ public final class AliasSenderManager {
             synchronizeIdentity(context, account, identity);
 
             // The first message to a newly discovered alias may have been ingested
-            // before the managed regex existed. Repair its identity immediately so
-            // replying to that same message already uses the alias.
-            if (message.identity == null) {
+            // before the managed regex existed. Repair exactly one DB column and
+            // only if no identity has been selected concurrently in the meantime.
+            if (message.id != null && message.identity == null) {
                 InternetAddress delivered = new InternetAddress(alias);
-                if (identity.sameAddress(delivered) || identity.similarAddress(delivered)) {
-                    message.identity = identity.id;
-                    db.message().updateMessage(message);
-                }
+                if (identity.sameAddress(delivered) || identity.similarAddress(delivered))
+                    db.getOpenHelper().getWritableDatabase().execSQL(
+                            "UPDATE message SET identity = ? WHERE id = ? AND identity IS NULL",
+                            new Object[]{identity.id, message.id});
             }
         } catch (Throwable ex) {
             Log.e(ex);
