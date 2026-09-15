@@ -67,6 +67,20 @@ public final class AliasTrafficScorer {
                 reasons.add("alias-domain-overlap");
         }
 
+        double aliasSpam = clamp01(in.aliasSpamRisk);
+        if (aliasSpam > 0) {
+            spam = noisyOr(spam, 0.48 * aliasSpam);
+            if (aliasSpam >= 0.65)
+                reasons.add("spam-affected-alias");
+        }
+
+        double senderSpam = clamp01(in.senderSpamConfidence);
+        if (senderSpam > 0) {
+            spam = noisyOr(spam, 0.70 * senderSpam);
+            if (senderSpam >= 0.60)
+                reasons.add("known-spam-sender-domain");
+        }
+
         double senderHam = clamp01(in.senderHamConfidence);
         if (senderHam > 0) {
             ham = noisyOr(ham, 0.58 * senderHam);
@@ -128,6 +142,8 @@ public final class AliasTrafficScorer {
         public boolean trustedDomainsConfigured;
         public boolean trustedDomainMatch;
         public double aliasDomainSimilarity;
+        public double aliasSpamRisk;
+        public double senderSpamConfidence;
         public double senderHamConfidence;
         public double unexpectedSender;
         public boolean hasUnsubscribe;
