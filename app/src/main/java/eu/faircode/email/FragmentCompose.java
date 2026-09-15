@@ -6074,7 +6074,23 @@ public class FragmentCompose extends FragmentBase {
                                 EntityLog.log(context, "Recognized=" + (recognized == null ? null : recognized.email));
 
                                 Address preferred = null;
-                                if (recognized != null) {
+                                // Envelope-To is FairEmail's stored authoritative delivery alias
+                                // for this account. Give it priority over visible To/Cc/Bcc when
+                                // choosing the sender alias for a reply.
+                                if (recognized != null && !TextUtils.isEmpty(ref.deliveredto)) {
+                                    String envelopeExtra = SpamIntelligence.resolveReplyExtra(
+                                            context, recognized, ref.deliveredto);
+                                    if (!TextUtils.isEmpty(envelopeExtra))
+                                        try {
+                                            preferred = new InternetAddress(ref.deliveredto);
+                                            EntityLog.log(context, "Reply alias from Envelope-To=" +
+                                                    ref.deliveredto + " extra=" + envelopeExtra);
+                                        } catch (AddressException ex) {
+                                            Log.w(ex);
+                                        }
+                                }
+
+                                if (preferred == null && recognized != null) {
                                     Address same = null;
                                     Address similar = null;
 
