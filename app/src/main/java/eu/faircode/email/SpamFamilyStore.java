@@ -163,30 +163,49 @@ public final class SpamFamilyStore {
             created = true;
         }
 
-        EntitySpamFamilyExemplar exemplar = new EntitySpamFamilyExemplar();
-        exemplar.family_id = familyId;
-        exemplar.account_uuid = accountUuid;
-        exemplar.source_message_id = messageId;
-        exemplar.fingerprint = fingerprint.toBytes();
-        exemplar.created_at = now;
+        return insertExemplar(dao, accountUuid, messageId, fingerprint,
+                familyId, created, best.score, now);
+    }
 
-        long inserted = dao.insertExemplar(exemplar);
-        if (inserted == -1) {
-            EntitySpamFamilyExemplar raced = dao.getExemplar(accountUuid, messageId);
-            if (created && dao.countExemplars(familyId) == 0)
-                dao.deleteFamily(familyId);
-            return new LearnResult(raced == null ? null : raced.family_id,
-                    false, false, best.score);
+    /**
+     * Explicit user assignment to an existing family. Unlike automatic joining,
+     * this never substitutes a different family merely because it scores higher.
+     */
+    public static synchronized LearnResult learnSpamIntoFamily(Context context,
+                                                               String accountUuid,
+                                                               long messageId,
+                                                               SpamFamilyFingerprint fingerprint,
+                                                               long requestedFamilyId) {
+        if (context == null || accountUuid == null || accountUuid.trim().isEmpty() ||
+                messageId <= 0 || requestedFamilyId <= 0)
+            return new LearnResult(null, false, false, SpamFamilyEngine.Score.ZERO);
+
+        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
+        EntitySpamFamily requested = dao.getFamily(requestedFamilyId);
+        if (requested == null || requested.id == null ||
+                !accountUuid.equals(requested.account_uuid))
+            return new LearnResult(null, false, false, SpamFamilyEngine.Score.ZERO);
+
+        if (!requested.active)
+            dao.setFamilyActive(requestedFamilyId, true, System.currentTimeMillis());
+
+        EntitySpamFamilyExemplar existing = dao.getExemplar(accountUuid, messageId);
+        if (existing != null) {
+            SpamFamilyEngine.Score score = fingerprint == null
+                    ? SpamFamilyEngine.Score.ZERO
+                    : scoreSafely(fingerprint, existing.fingerprint);
+            // A message already exemplifying another family is not silently
+            // moved here. Family reassignment deserves an explicit operation.
+            return new LearnResult(existing.family_id, false, false, score);
         }
 
-        prune(dao, familyId);
+        if (fingerprint == null || fingerprint.evidenceCount() < MIN_LEARN_EVIDENCE)
+            return new LearnResult(requestedFamilyId, false, false,
+                    SpamFamilyEngine.Score.ZERO);
 
-        // The ledger label is written immediately after this call. Keep the new
-        // family alive provisionally; reconcileFamily() replaces this value with
-        // the real lifetime confirmed count once the label commit succeeds.
-        int confirmed = dao.countConfirmedMembers(familyId);
-        dao.setFamilyStats(familyId, Math.max(1, confirmed), now);
-        return new LearnResult(familyId, created, true, best.score);
+        SpamFamilyEngine.Score previous = bestInFamily(dao, requestedFamilyId, fingerprint);
+        return insertExemplar(dao, accountUuid, messageId, fingerprint,
+                requestedFamilyId, false, previous, System.currentTimeMillis());
     }
 
     public static synchronized Long unlearnMessage(Context context,
@@ -213,6 +232,40 @@ public final class SpamFamilyStore {
                 familyId, System.currentTimeMillis());
     }
 
+    private static LearnResult insertExemplar(DaoSpamFamily dao,
+                                              String accountUuid,
+                                              long messageId,
+                                              SpamFamilyFingerprint fingerprint,
+                                              long familyId,
+                                              boolean created,
+                                              SpamFamilyEngine.Score previous,
+                                              long now) {
+        EntitySpamFamilyExemplar exemplar = new EntitySpamFamilyExemplar();
+        exemplar.family_id = familyId;
+        exemplar.account_uuid = accountUuid;
+        exemplar.source_message_id = messageId;
+        exemplar.fingerprint = fingerprint.toBytes();
+        exemplar.created_at = now;
+
+        long inserted = dao.insertExemplar(exemplar);
+        if (inserted == -1) {
+            EntitySpamFamilyExemplar raced = dao.getExemplar(accountUuid, messageId);
+            if (created && dao.countExemplars(familyId) == 0)
+                dao.deleteFamily(familyId);
+            return new LearnResult(raced == null ? null : raced.family_id,
+                    false, false, previous);
+        }
+
+        prune(dao, familyId);
+
+        // The ledger label is written immediately after this call. Keep a new
+        // family alive provisionally; reconcileFamily() replaces this value with
+        // the real lifetime confirmed count once the label commit succeeds.
+        int confirmed = dao.countConfirmedMembers(familyId);
+        dao.setFamilyStats(familyId, Math.max(1, confirmed), now);
+        return new LearnResult(familyId, created, true, previous);
+    }
+
     private static Best findBest(DaoSpamFamily dao,
                                  String accountUuid,
                                  SpamFamilyFingerprint fingerprint) {
@@ -223,20 +276,30 @@ public final class SpamFamilyStore {
             for (EntitySpamFamily family : families) {
                 if (family == null || family.id == null)
                     continue;
-                List<EntitySpamFamilyExemplar> exemplars = dao.getExemplars(family.id);
-                if (exemplars == null)
-                    continue;
-                for (EntitySpamFamilyExemplar exemplar : exemplars) {
-                    if (exemplar == null || exemplar.fingerprint == null)
-                        continue;
-                    SpamFamilyEngine.Score score = scoreSafely(fingerprint, exemplar.fingerprint);
-                    if (score.value > best.value) {
-                        best = score;
-                        winner = family.id;
-                    }
+                SpamFamilyEngine.Score score = bestInFamily(dao, family.id, fingerprint);
+                if (score.value > best.value) {
+                    best = score;
+                    winner = family.id;
                 }
             }
         return new Best(winner, best);
+    }
+
+    private static SpamFamilyEngine.Score bestInFamily(DaoSpamFamily dao,
+                                                        long familyId,
+                                                        SpamFamilyFingerprint fingerprint) {
+        SpamFamilyEngine.Score best = SpamFamilyEngine.Score.ZERO;
+        List<EntitySpamFamilyExemplar> exemplars = dao.getExemplars(familyId);
+        if (exemplars == null)
+            return best;
+        for (EntitySpamFamilyExemplar exemplar : exemplars) {
+            if (exemplar == null || exemplar.fingerprint == null)
+                continue;
+            SpamFamilyEngine.Score score = scoreSafely(fingerprint, exemplar.fingerprint);
+            if (score.value > best.value)
+                best = score;
+        }
+        return best;
     }
 
     private static SpamFamilyEngine.Score scoreSafely(SpamFamilyFingerprint fingerprint,
