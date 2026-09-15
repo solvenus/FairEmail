@@ -32,12 +32,7 @@ public final class SpamIntelligence {
             if (context == null)
                 return;
 
-            // Keep intent observation alive even when this entry point is the
-            // first spam-intelligence code touched in a process.
             SpamIntentObserver.start(context);
-
-            // Populate the registry from already-synced mail once per process.
-            // This is background, restart-safe and idempotent.
             AliasBackfill.schedule(context);
 
             if (folder == null || message == null || message.account == null ||
@@ -154,8 +149,6 @@ public final class SpamIntelligence {
             return true;
 
         String value = extra.trim();
-        // Our registry-backed path intentionally supports only a plain local-part.
-        // FairEmail's +extra/@extra/name forms remain governed by sender_extra.
         if (value.isEmpty() || value.startsWith("+") || value.startsWith("@") || value.contains(","))
             return false;
 
@@ -188,7 +181,7 @@ public final class SpamIntelligence {
                                  EntityAccount account,
                                  EntityMessage message,
                                  int label,
-                                 Long familyId) {
+                                 Long requestedFamilyId) {
         try {
             if (context == null || account == null || message == null ||
                     message.id == null || account.uuid == null)
@@ -196,14 +189,30 @@ public final class SpamIntelligence {
 
             DaoAlias dao = SpamIntelligenceDB.getInstance(context).alias();
 
-            // Label actions can arrive before a message has passed the normal
-            // intelligence ingress. Ensure a ledger row exists first.
-            EntityAliasDelivery delivery = dao.getDelivery(account.uuid, message.id);
-            if (delivery == null && message.folder != null && message.deliveredto != null) {
+            EntityAliasDelivery before = dao.getDelivery(account.uuid, message.id);
+            if (before == null && message.folder != null && message.deliveredto != null) {
                 EntityFolder folder = DB.getInstance(context).folder().getFolder(message.folder);
                 if (folder != null)
                     observeMessage(context, account, folder, message);
-                delivery = dao.getDelivery(account.uuid, message.id);
+                before = dao.getDelivery(account.uuid, message.id);
+            }
+            if (before == null)
+                return;
+
+            Long familyId = requestedFamilyId;
+            SpamFamilyStore.LearnResult familyLearn = null;
+            if (label == EntityAliasDelivery.LABEL_SPAM && familyId == null) {
+                SpamFamilyFingerprint fingerprint = SpamFamilyMessageAdapter.fromMessage(context, message);
+                if (fingerprint != null) {
+                    familyLearn = SpamFamilyStore.learnSpam(
+                            context, account.uuid, message.id, fingerprint);
+                    familyId = familyLearn.familyId;
+                    if (familyLearn.learned)
+                        Log.i("SpamFamily learned family=" + familyId +
+                                " message=" + message.id +
+                                " created=" + familyLearn.created +
+                                " previous=" + familyLearn.previousBest);
+                }
             }
 
             boolean changed = SpamAliasStore.setLabel(
@@ -212,20 +221,30 @@ public final class SpamIntelligence {
                     message.id,
                     label,
                     familyId);
-            if (!changed)
+            if (!changed) {
+                // Do not leave a newly inserted exemplar orphaned if the ledger
+                // could not accept the corresponding spam label.
+                if (familyLearn != null && familyLearn.learned &&
+                        before.label != EntityAliasDelivery.LABEL_SPAM)
+                    SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
                 return;
+            }
+
+            if (label != EntityAliasDelivery.LABEL_SPAM &&
+                    before.label == EntityAliasDelivery.LABEL_SPAM)
+                SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
 
             // A confirmed spam delivery means the address has escaped its intended
             // context. This does NOT retire it yet; COMPROMISED stays reply-capable.
-            delivery = dao.getDelivery(account.uuid, message.id);
-            if (delivery != null) {
+            EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
+            if (after != null) {
                 if (label == EntityAliasDelivery.LABEL_SPAM)
-                    dao.markCompromised(account.uuid, delivery.address);
+                    dao.markCompromised(account.uuid, after.address);
                 else {
-                    EntityAlias alias = dao.getAlias(account.uuid, delivery.address);
+                    EntityAlias alias = dao.getAlias(account.uuid, after.address);
                     if (alias != null && alias.state == EntityAlias.STATE_COMPROMISED &&
                             alias.spam_hits == 0)
-                        dao.setState(account.uuid, delivery.address, EntityAlias.STATE_ACTIVE);
+                        dao.setState(account.uuid, after.address, EntityAlias.STATE_ACTIVE);
                 }
             }
 
