@@ -5,6 +5,7 @@ on:
   push:
     branches:
       - feature/spam-families
+      - feature/spam-control-p0
     paths:
       - 'app/src/github/AndroidManifest.xml'
       - 'app/src/githubDebug/AndroidManifest.xml'
@@ -16,16 +17,20 @@ on:
       - 'app/src/main/java/eu/faircode/email/AliasBurnManager.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnPolicy.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnReadiness.java'
+      - 'app/src/main/java/eu/faircode/email/AliasCompromisePolicy.java'
+      - 'app/src/main/java/eu/faircode/email/AliasCompromiseReviewStore.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainAffinity.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestionScorer.java'
       - 'app/src/main/java/eu/faircode/email/AliasDomainSuggestions.java'
       - 'app/src/main/java/eu/faircode/email/AliasRegistry.java'
+      - 'app/src/main/java/eu/faircode/email/AliasReplacementVerifier.java'
       - 'app/src/main/java/eu/faircode/email/AliasSenderManager.java'
       - 'app/src/main/java/eu/faircode/email/AliasServerActuator.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficScorer.java'
       - 'app/src/main/java/eu/faircode/email/CpanelAliasActuator.java'
       - 'app/src/main/java/eu/faircode/email/DaoAlias.java'
+      - 'app/src/main/java/eu/faircode/email/DaoMessage.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamFamily.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamActionHistory.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamSnapshot.java'
@@ -35,7 +40,9 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamControlPolicy.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
+      - 'app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
+      - 'app/src/main/java/eu/faircode/email/SpamHistoricalScanner.java'
       - 'app/src/main/java/eu/faircode/email/SpamNetworkAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
@@ -80,61 +87,40 @@ jobs:
             -keystore "$HOME/.android/debug.keystore" \
             -storepass android \
             -alias androiddebugkey)"
-          actual="$(awk '/^[[:space:]]*SHA256: / { sub(/^[[:space:]]*SHA256: /, ""); print; exit }' <<< "$keytool_output")"
-          test "$actual" = "$SPAM_FAMILIES_DEBUG_CERT_SHA256"
-          echo "Pinned debug signing certificate: $actual"
-      - name: Grant execute permission for gradlew
+          actual_cert="$(printf '%s\n' "$keytool_output" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr '[:lower:]' '[:upper:]' | tr -d '\r')"
+          test -n "$actual_cert"
+          test "$actual_cert" = "$SPAM_FAMILIES_DEBUG_CERT_SHA256"
+      - name: Make gradlew executable
         run: chmod +x gradlew
       - name: Compile GitHub debug Java and Room code
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
-            :app:compileGithubDebugJavaWithJavac
+        run: ./gradlew :app:compileGithubDebugJavaWithJavac --stacktrace --no-daemon
       - name: Verify SpamIntelligenceDB migrations 8 to 10
-        run: |
-          set -euo pipefail
-          python3 .github/scripts/verify_spam_intelligence_migration.py
+        run: python3 .github/scripts/verify_spam_intelligence_migration.py
       - name: Assemble GitHub debug APK
-        run: |
-          set -euo pipefail
-          ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
-            :app:assembleGithubDebug
+        run: ./gradlew :app:assembleGithubDebug --stacktrace --no-daemon
       - name: Verify APK signing identity
         run: |
           set -euo pipefail
-          apk="$(find app/build/outputs/apk/github/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -n "$apk"
-          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
-          test -x "$apksigner"
-
-          mkdir -p build
-          cert_output="$($apksigner verify --print-certs "$apk" 2>build/apksigner-warnings.log)"
-          printf '%s\n' "$cert_output"
-          if [[ "$cert_output" =~ certificate\ SHA-256\ digest:\ ([0-9A-Fa-f:]+) ]]; then
-            actual="${BASH_REMATCH[1]}"
-          else
-            echo "Could not find certificate SHA-256 digest in apksigner output" >&2
-            exit 1
-          fi
-          actual="$(tr '[:upper:]' '[:lower:]' <<< "$actual" | tr -d ':[:space:]')"
-          expected="$(tr '[:upper:]' '[:lower:]' <<< "$SPAM_FAMILIES_DEBUG_CERT_SHA256" | tr -d ':[:space:]')"
-          echo "APK signer digest normalized: $actual"
-          echo "Expected digest normalized:   $expected"
-          test "$actual" = "$expected"
-          echo "Verified APK signing certificate: $SPAM_FAMILIES_DEBUG_CERT_SHA256"
+          APK="$(find app/build/outputs/apk/github/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          cert_output="$(keytool -printcert -jarfile "$APK")"
+          actual_cert="$(printf '%s\n' "$cert_output" | sed -n 's/^[[:space:]]*SHA256: //p' | head -n 1 | tr '[:lower:]' '[:upper:]' | tr -d '\r')"
+          test -n "$actual_cert"
+          test "$actual_cert" = "$SPAM_FAMILIES_DEBUG_CERT_SHA256"
       - name: Prepare checksummed APK artifact
         run: |
           set -euo pipefail
-          mkdir -p build/spam-family-apk
-          cp app/build/outputs/apk/github/debug/*.apk build/spam-family-apk/
-          printf '%s\n' "$SPAM_FAMILIES_DEBUG_CERT_SHA256" > build/spam-family-apk/SIGNING_CERT_SHA256.txt
-          printf '%s\n' "$GITHUB_SHA" > build/spam-family-apk/BUILD_COMMIT.txt
-          (cd build/spam-family-apk && sha256sum *.apk > SHA256SUMS.txt)
-          test -s build/spam-family-apk/SHA256SUMS.txt
+          mkdir -p build/spam-families-artifact
+          APK="$(find app/build/outputs/apk/github/debug -maxdepth 1 -type f -name '*.apk' | head -n 1)"
+          test -n "$APK"
+          cp "$APK" build/spam-families-artifact/FairEmail-v1.2333a-github-debug.apk
+          sha256sum build/spam-families-artifact/FairEmail-v1.2333a-github-debug.apk > build/spam-families-artifact/SHA256SUMS.txt
+          printf '%s\n' "${GITHUB_SHA}" > build/spam-families-artifact/BUILD_COMMIT.txt
+          printf '%s\n' "$SPAM_FAMILIES_DEBUG_CERT_SHA256" > build/spam-families-artifact/SIGNER_SHA256.txt
       - name: Upload Spam Families debug APK
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: FairEmail-SpamFamilies-githubDebug-${{ github.sha }}
-          path: build/spam-family-apk/
+          path: build/spam-families-artifact/
           if-no-files-found: error
           retention-days: 14
