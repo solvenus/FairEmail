@@ -33,6 +33,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java \
-                  app/src/main/java/eu/faircode/email/FragmentCompose.java
-          git commit -m "Finish human Spam Control UX and reply alias persistence"
+                  app/src/main/java/eu/faircode/email/FragmentCompose.java \
+                  app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java
+          git commit -m "Apply exact Spam Control follow-up"
           git push origin HEAD:feature/spam-families
