@@ -21,24 +21,24 @@ import java.util.List;
 @Dao
 public interface DaoAlias {
     @Query("SELECT * FROM alias" +
-            " WHERE account = :account" +
+            " WHERE account_uuid = :accountUuid" +
             " ORDER BY last_seen DESC, address COLLATE NOCASE")
-    LiveData<List<EntityAlias>> liveAliases(long account);
+    LiveData<List<EntityAlias>> liveAliases(String accountUuid);
 
     @Query("SELECT * FROM alias" +
-            " WHERE account = :account" +
+            " WHERE account_uuid = :accountUuid" +
             " ORDER BY last_seen DESC, address COLLATE NOCASE")
-    List<EntityAlias> getAliases(long account);
+    List<EntityAlias> getAliases(String accountUuid);
 
     @Query("SELECT * FROM alias" +
-            " WHERE account = :account AND address = :address" +
+            " WHERE account_uuid = :accountUuid AND address = :address" +
             " LIMIT 1")
-    EntityAlias getAlias(long account, String address);
+    EntityAlias getAlias(String accountUuid, String address);
 
     @Query("SELECT * FROM alias" +
-            " WHERE account = :account AND spam_hits > 0" +
+            " WHERE account_uuid = :accountUuid AND spam_hits > 0" +
             " ORDER BY spam_hits DESC, last_spam DESC, last_seen DESC")
-    LiveData<List<EntityAlias>> liveSpamAffected(long account);
+    LiveData<List<EntityAlias>> liveSpamAffected(String accountUuid);
 
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     long insertAlias(EntityAlias alias);
@@ -50,37 +50,37 @@ public interface DaoAlias {
             " first_seen = CASE WHEN :received < first_seen THEN :received ELSE first_seen END," +
             " last_seen = CASE WHEN :received > last_seen THEN :received ELSE last_seen END," +
             " messages = messages + 1" +
-            " WHERE account = :account AND address = :address")
-    int observeDelivery(long account, String address, long received);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int observeDelivery(String accountUuid, String address, long received);
 
     @Query("UPDATE alias SET" +
             " spam_hits = spam_hits + 1," +
             " last_spam = CASE WHEN last_spam IS NULL OR :received > last_spam THEN :received ELSE last_spam END" +
-            " WHERE account = :account AND address = :address")
-    int observeSpam(long account, String address, long received);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int observeSpam(String accountUuid, String address, long received);
 
     @Query("UPDATE alias SET" +
             " ham_hits = ham_hits + 1," +
             " last_ham = CASE WHEN last_ham IS NULL OR :received > last_ham THEN :received ELSE last_ham END" +
-            " WHERE account = :account AND address = :address")
-    int observeHam(long account, String address, long received);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int observeHam(String accountUuid, String address, long received);
 
     @Query("UPDATE alias SET state = :state" +
-            " WHERE account = :account AND address = :address")
-    int setState(long account, String address, int state);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setState(String accountUuid, String address, int state);
 
     @Query("UPDATE alias SET service = :service" +
-            " WHERE account = :account AND address = :address")
-    int setService(long account, String address, String service);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setService(String accountUuid, String address, String service);
 
     @Query("UPDATE alias SET note = :note" +
-            " WHERE account = :account AND address = :address")
-    int setNote(long account, String address, String note);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int setNote(String accountUuid, String address, String note);
 
     @Query("UPDATE alias SET replaced_by = :replacement, state = " + EntityAlias.STATE_REPLACED +
-            " WHERE account = :account AND address = :address")
-    int markReplaced(long account, String address, String replacement);
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int markReplaced(String accountUuid, String address, String replacement);
 
-    @Query("DELETE FROM alias WHERE account = :account")
-    int deleteAliases(long account);
+    @Query("DELETE FROM alias WHERE account_uuid = :accountUuid")
+    int deleteAliases(String accountUuid);
 }
