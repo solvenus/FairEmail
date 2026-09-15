@@ -1,4 +1,4 @@
-# Gate trigger: truthful alias buckets + veto/control-integrity hardening
+# Gate trigger: final transactional cPanel burn + truthful SMTP lifecycle
 name: Spam Intelligence Android Compile
 
 on:
@@ -29,6 +29,8 @@ on:
       - 'app/src/main/java/eu/faircode/email/AliasTrafficAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/AliasTrafficScorer.java'
       - 'app/src/main/java/eu/faircode/email/CpanelAliasActuator.java'
+      - 'app/src/main/java/eu/faircode/email/CpanelForwarderRoutePlan.java'
+      - 'app/src/main/java/eu/faircode/email/CpanelForwarderTransaction.java'
       - 'app/src/main/java/eu/faircode/email/DaoAlias.java'
       - 'app/src/main/java/eu/faircode/email/DaoMessage.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamFamily.java'
