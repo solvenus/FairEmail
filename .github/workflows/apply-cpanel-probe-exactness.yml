@@ -1,0 +1,41 @@
+name: Apply cPanel exact probe
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_cpanel_probe_exactness.py'
+      - '.github/workflows/apply-cpanel-probe-exactness.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed exact probe patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_cpanel_probe_exactness.py
+          git diff --check
+          if git diff -- app/src/main/java/eu/faircode/email/CpanelAliasActuator.java | grep -F 'args.put("regex"'; then
+            echo 'regex filter still present' >&2
+            exit 1
+          fi
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/CpanelAliasActuator.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Use exact local matching for cPanel forwarder probe"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
