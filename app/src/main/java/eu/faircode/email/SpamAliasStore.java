@@ -36,7 +36,7 @@ public final class SpamAliasStore {
                                           String folderType) {
         final String account = normalizeAccount(accountUuid);
         final String address = AliasRegistry.normalizeAddress(deliveredTo);
-        if (account == null || address == null || messageId <= 0)
+        if (context == null || account == null || address == null || messageId <= 0)
             return false;
 
         final long timestamp = received > 0 ? received : System.currentTimeMillis();
@@ -50,8 +50,11 @@ public final class SpamAliasStore {
 
                 EntityAliasDelivery existing = dao.getDelivery(account, messageId);
                 if (existing != null) {
-                    if (!Objects.equals(existing.folder_type, folder))
+                    if (!Objects.equals(existing.folder_type, folder)) {
+                        changeFolderCount(dao, account, existing.address,
+                                existing.folder_type, folder);
                         dao.setDeliveryFolder(account, messageId, folder);
+                    }
                     return false;
                 }
 
@@ -78,14 +81,7 @@ public final class SpamAliasStore {
                     return false;
 
                 dao.observeDelivery(account, address, timestamp);
-
-                if (folder != null) {
-                    EntityAlias current = dao.getAlias(account, address);
-                    String counts = incrementCounter(current == null ? null : current.folder_counts,
-                            folder, 1);
-                    dao.setFolderCounts(account, address, counts);
-                }
-
+                changeFolderCount(dao, account, address, null, folder);
                 return true;
             }
         });
@@ -106,7 +102,7 @@ public final class SpamAliasStore {
             throw new IllegalArgumentException("label=" + label);
 
         final String account = normalizeAccount(accountUuid);
-        if (account == null || messageId <= 0)
+        if (context == null || account == null || messageId <= 0)
             return false;
 
         final SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(context);
@@ -142,21 +138,57 @@ public final class SpamAliasStore {
         });
     }
 
+    /** Keep the delivery ledger and cached per-alias folder counters in lockstep. */
     public static void setFolder(Context context,
                                  String accountUuid,
                                  long messageId,
                                  String folderType) {
-        String account = normalizeAccount(accountUuid);
-        if (account == null || messageId <= 0)
+        final String account = normalizeAccount(accountUuid);
+        if (context == null || account == null || messageId <= 0)
             return;
-        SpamIntelligenceDB.getInstance(context).alias()
-                .setDeliveryFolder(account, messageId, normalizeToken(folderType));
+
+        final String folder = normalizeToken(folderType);
+        final SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(context);
+        db.runInTransaction(new Callable<Boolean>() {
+            @Override
+            public Boolean call() throws Exception {
+                DaoAlias dao = db.alias();
+                EntityAliasDelivery delivery = dao.getDelivery(account, messageId);
+                if (delivery == null || Objects.equals(delivery.folder_type, folder))
+                    return false;
+
+                changeFolderCount(dao, account, delivery.address,
+                        delivery.folder_type, folder);
+                dao.setDeliveryFolder(account, messageId, folder);
+                return true;
+            }
+        });
     }
 
     private static int deltaFor(int oldLabel, int newLabel, int target) {
         int oldValue = oldLabel == target ? 1 : 0;
         int newValue = newLabel == target ? 1 : 0;
         return newValue - oldValue;
+    }
+
+    private static void changeFolderCount(DaoAlias dao,
+                                          String account,
+                                          String address,
+                                          String oldFolder,
+                                          String newFolder) throws JSONException {
+        if (Objects.equals(oldFolder, newFolder))
+            return;
+
+        EntityAlias alias = dao.getAlias(account, address);
+        if (alias == null)
+            return;
+
+        String counts = alias.folder_counts;
+        if (oldFolder != null)
+            counts = incrementCounter(counts, oldFolder, -1);
+        if (newFolder != null)
+            counts = incrementCounter(counts, newFolder, 1);
+        dao.setFolderCounts(account, address, counts);
     }
 
     private static void changeFamilyCount(DaoAlias dao,
