@@ -26,6 +26,7 @@ on:
       - 'app/src/main/java/eu/faircode/email/EntitySpamFamily*.java'
       - 'app/src/main/java/eu/faircode/email/EntitySpamIntent.java'
       - 'app/src/main/java/eu/faircode/email/EntitySpamMeta.java'
+      - 'app/src/main/java/eu/faircode/email/EntitySpamRescoreTask.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
