@@ -61,7 +61,7 @@ public final class SpamIntelligence {
                     evidence.unsubscribe);
 
             // Reuse FairEmail's existing sender_extra mechanism, but constrain it
-            // to exact aliases already observed in our registry.
+            // to exact active aliases already observed in our registry.
             AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
             // Intelligence must never be able to break mail synchronization.
@@ -70,7 +70,7 @@ public final class SpamIntelligence {
     }
 
     /**
-     * True only for an alias actually observed for this FairEmail account.
+     * True only for an active alias actually observed for this FairEmail account.
      * This lets automatic replies use an envelope alias without opening the
      * identity to arbitrary sender editing.
      */
@@ -100,7 +100,7 @@ public final class SpamIntelligence {
 
             EntityAlias known = SpamIntelligenceDB.getInstance(context)
                     .alias().getAlias(account.uuid, alias);
-            return known != null && known.state != EntityAlias.STATE_DISABLED;
+            return known != null && known.state == EntityAlias.STATE_ACTIVE;
         } catch (Throwable ex) {
             Log.e(ex);
             return false;
@@ -127,7 +127,7 @@ public final class SpamIntelligence {
 
     /**
      * Permit sender-extra semantics either through FairEmail's own setting or
-     * through an exact alias present in the local Alias Registry.
+     * through an exact active alias present in the local Alias Registry.
      */
     public static boolean permitsExtra(Context context,
                                        EntityIdentity identity,
