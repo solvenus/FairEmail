@@ -1,4 +1,4 @@
-# Gate trigger: review conflict impact + alias lifecycle timeline
+# Gate trigger: canonical Spam message state + Terminal observability
 name: Spam Intelligence Android Compile
 
 on:
@@ -35,17 +35,20 @@ on:
       - 'app/src/main/java/eu/faircode/email/DaoMessage.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamFamily.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamActionHistory.java'
+      - 'app/src/main/java/eu/faircode/email/DaoSpamMessage.java'
       - 'app/src/main/java/eu/faircode/email/DaoSpamSnapshot.java'
       - 'app/src/main/java/eu/faircode/email/EntityAlias.java'
       - 'app/src/main/java/eu/faircode/email/EntityAliasDelivery.java'
       - 'app/src/main/java/eu/faircode/email/EntitySpam*.java'
       - 'app/src/main/java/eu/faircode/email/SpamAliasStore.java'
+      - 'app/src/main/java/eu/faircode/email/SpamControlLog.java'
       - 'app/src/main/java/eu/faircode/email/SpamControlPolicy.java'
       - 'app/src/main/java/eu/faircode/email/SpamControlQueueStats.java'
       - 'app/src/main/java/eu/faircode/email/SpamDecisionScorer.java'
       - 'app/src/main/java/eu/faircode/email/SpamExactBulkPropagator.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamily*.java'
       - 'app/src/main/java/eu/faircode/email/SpamHistoricalScanner.java'
+      - 'app/src/main/java/eu/faircode/email/SpamMessageStore.java'
       - 'app/src/main/java/eu/faircode/email/SpamNetworkAnalyzer.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
       - 'app/src/main/java/eu/faircode/email/SpamIntelligenceDB.java'
@@ -97,7 +100,7 @@ jobs:
         run: chmod +x gradlew
       - name: Compile GitHub debug Java and Room code
         run: ./gradlew :app:compileGithubDebugJavaWithJavac --stacktrace --no-daemon
-      - name: Verify SpamIntelligenceDB migrations 8 to 10
+      - name: Verify SpamIntelligenceDB migrations 8 to 11
         run: python3 .github/scripts/verify_spam_intelligence_migration.py
       - name: Assemble GitHub debug APK
         run: ./gradlew :app:assembleGithubDebug --stacktrace --no-daemon
