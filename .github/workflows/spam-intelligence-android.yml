@@ -1,4 +1,4 @@
-# Gate trigger: final transactional cPanel burn + truthful SMTP lifecycle
+# Gate trigger: read-only cPanel diagnostic + four alias buckets
 name: Spam Intelligence Android Compile
 
 on:
