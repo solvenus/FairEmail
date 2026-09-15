@@ -1,3 +1,4 @@
+# Post-retirement final-head gate
 name: Verify Spam Control contract coverage
 
 on:
@@ -16,6 +17,8 @@ on:
       - '.github/workflows/verify-spam-control-observability-contract.yml'
       - '.github/scripts/verify_spam_exact_family_retirement.py'
       - '.github/workflows/verify-spam-exact-family-retirement.yml'
+      - '.github/scripts/verify_reply_alias_authority.py'
+      - '.github/workflows/verify-reply-alias-authority.yml'
       - '.github/scripts/verify_spam_control_contract_coverage.py'
       - '.github/workflows/verify-spam-control-contract-coverage.yml'
   workflow_dispatch:

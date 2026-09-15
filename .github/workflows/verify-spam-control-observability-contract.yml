@@ -1,3 +1,4 @@
+# Post-retirement final-head gate
 name: Verify Spam Control observability contract
 
 on:

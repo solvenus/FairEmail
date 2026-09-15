@@ -1,4 +1,4 @@
-# Gate trigger: final cPanel transaction semantics after live integration
+# Post-retirement final-head gate: pure-Java family/alias/cPanel invariants
 name: Spam Family Core
 
 on:
@@ -6,6 +6,7 @@ on:
     branches:
       - feature/spam-families
       - feature/spam-control-p0
+      - changeset/spam-control-family-correction-semantics
     paths:
       - 'app/src/main/java/eu/faircode/email/SpamFamilyEngine.java'
       - 'app/src/main/java/eu/faircode/email/SpamFamilyFingerprint.java'

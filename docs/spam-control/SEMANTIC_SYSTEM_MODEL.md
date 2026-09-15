@@ -3,39 +3,39 @@
 **Status:** Living architecture authority  
 **Method:** Semantic Architecture Engineering / Concept-Driven Software Engineering  
 **Operational branch:** `feature/spam-control-p0`  
-**Current reconstruction baseline:** `dece32b7089e6447f6adf3b32449c03fcfb1c5dd`  
-**Known phone baseline:** `safety/spam-control-phone-checkpoint-6e7b6a52`  
+**Active ChangeSet:** `changeset/spam-control-family-correction-semantics`  
+**ChangeSet base:** `c2c78a5dced58ae2d72a3383e080ded0d5bbdf55`  
+**Runtime retirement commit:** `fcd3fce536fe770c084922d7187b58a16fb18555`  
+**Known phone baseline:** `safety/spam-control-phone-checkpoint-6e7b6a52`
 
-This document exists beside the code and is part of programming, not post-hoc documentation. A ChangeSet that changes the semantics below must update this model, the Decision Ledger, the affected regression contract, and runtime observability in the same unit of work.
+This document lives beside the code and is part of programming. A ChangeSet that changes the semantics below must update this model, the Decision Ledger, the affected regression contracts, and runtime observability in the same unit of work.
 
 ---
 
-## 1. Project intent / capability model
+## 1. Capability model
 
 Spam Control is a human-controlled intelligence layer over FairEmail. It must let one person:
 
-1. review retained mail as spam/not-spam without requiring alias metadata;
-2. learn deterministic spam families from explicit human truth;
-3. propagate an exact family decision to matching retained UNKNOWN messages without overwriting explicit HAM;
+1. review retained mail as Spam / Ikke spam without requiring alias metadata;
+2. learn deterministic Spam Families from explicit human truth;
+3. propagate an exact-family Spam decision to retained UNKNOWN twins without overwriting explicit HAM;
 4. maintain optional alias intelligence when `Envelope-To` exists;
-5. distinguish spam classification from alias compromise;
+5. distinguish Spam classification from alias compromise;
 6. distinguish local alias lifecycle from physical SMTP rejection state;
-7. inspect and undo human learning actions;
-8. reset learning without losing raw message visibility;
-9. explain historical scans, classification, alias decisions and cPanel operations through persistent observability;
+7. inspect, undo and reset learned state without losing raw mail/message visibility;
+8. explain historical scans, classification, alias decisions and cPanel operations through persistent observability;
+9. keep fuzzy/template similarity in Spam Network rather than family identity;
 10. preserve FairEmail reply-from-alias behavior while Spam Control evolves.
 
-The user is the final authority on explicit Spam / Ikke spam / family-correction actions. Derived predictions may assist but must never silently override explicit human truth.
+The human is authoritative for explicit Spam / Ikke spam. Family organization is deterministic from the selected family identity definition, not a second manual classifier.
 
 ---
 
-## 2. Domain model
+## 2. Domain model and authority
 
 ### 2.1 FairEmail Mail Message
 
-Identity: FairEmail `message.id` within its owning account.
-
-Raw source object. It owns mail content/folder membership in FairEmail's main DB. Spam Control does not duplicate bodies or raw EML.
+FairEmail `message.id` inside its account is the raw mail object. It owns mail content and folder membership in FairEmail's main DB. Spam Control does not duplicate mail bodies or raw EML.
 
 ### 2.2 Spam Message
 
@@ -43,214 +43,124 @@ Implementation: `EntitySpamMessage` / `spam_message`.
 
 Identity: `(account_uuid, message_id)`.
 
-Meaning: canonical per-message Spam Control representation whether or not `Envelope-To` exists.
+Canonical owner of per-message Spam Control truth:
 
-Owns:
-
-- raw observation context used by Spam Control: `received`, `folder_type`, normalized `delivered_to` when available;
-- explicit/classifier message label: UNKNOWN / HAM / SPAM;
+- observation context: received time, folder type, normalized delivered-to when known;
+- label: UNKNOWN / HAM / SPAM;
 - confirmed `family_id` for SPAM;
-- derived exact `predicted_family_id`, score and assessment time.
+- derived exact `predicted_family_id`, score and assessed time.
 
-It does **not** own alias lifecycle or server state.
+A message is valid Spam Control state even when no alias row exists.
 
-### 2.3 Alias
+### 2.3 Alias and Alias Delivery
 
-Implementation: `EntityAlias` / `alias`.
+`EntityAlias` / `alias` owns persistent alias inventory, service/domain knowledge, sender-domain evidence, counters, lifecycle, replacement metadata and SMTP rejection lifecycle.
 
-Identity: `(account_uuid, normalized address)`.
+`EntityAliasDelivery` / `alias_delivery` is optional per-message alias enrichment/idempotence/history when an envelope alias is known. Its label/family fields are compatibility/enrichment mirrors, not canonical message truth.
 
-Meaning: persistent inventory entry for an observed envelope recipient.
+### 2.4 Spam Family
 
-Owns:
+Production family identity is exactly:
 
-- service/service-domain knowledge;
-- observed and trusted sender-domain knowledge;
-- alias spam/ham evidence counters;
-- family counters for alias context;
-- local lifecycle state: ACTIVE / REPLACED / DISABLED / IGNORED / COMPROMISED;
-- replacement metadata;
-- SMTP rejection lifecycle and route snapshot metadata.
+`normalize(sender display name) + normalize(subject)`
 
-### 2.4 Alias Delivery
+Normalization: Unicode NFKC, NBSP→space, lowercase, whitespace collapse, trim.
 
-Implementation: `EntityAliasDelivery` / `alias_delivery`.
-
-Identity: `(account_uuid, message_id)`.
-
-Meaning: optional alias enrichment/idempotence/history ledger for one message whose envelope alias is known.
-
-Owns alias-context observations and assessment snapshots. Its label/family fields are a **compatibility/enrichment mirror**, not canonical message truth.
-
-A message without this row remains fully valid Spam Control state.
-
-### 2.5 Spam Family
-
-Implementation: `spam_family` + exemplars + exact identity mapping.
-
-Meaning: deterministic human spam group.
-
-Production identity:
-
-`normalized sender display name + normalized subject`
-
-Normalization currently uses Unicode NFKC, NBSP→space, lowercase, whitespace collapse and trim.
-
-Explicitly excluded from family identity:
+Not family identity:
 
 - sender email address;
 - delivery alias;
-- HTML/template similarity;
+- body/HTML/template similarity;
 - link similarity;
 - rotating product/body details.
 
-### 2.6 Exact Family Identity Mapping
+### 2.5 Exact Family Identity Mapping
 
-Implementation: `SpamFamilyIdentity` + `EntitySpamMeta` keys `family_identity:<account>:<identity-key>`.
+Implementation: `SpamFamilyIdentity` + persistent `family_identity:<account>:<identity-key>` meta mapping.
 
-Meaning: persistent binding from deterministic identity key to family id.
+A complete canonical identity maps to one family. If sender-name or subject is missing, production Spam learning uses a deterministic isolated per-message key. Missing identity never reactivates fuzzy family joining.
 
-If sender-name or subject is missing, production spam learning uses a deterministic **isolated per-message key**. Missing identity must never reactivate fuzzy family joining.
+### 2.6 Legacy Family Exclusion
 
-### 2.7 Family Exclusion
+`spam_family_exclusion` remains physically present during this ChangeSet for backward-compatible snapshot/undo/rollback readability.
 
-Implementation: `spam_family_exclusion`.
+It is **legacy inert recovery state**. Production exact `matchIdentity()` does not consult it, and production has no writer for new per-message family exclusions.
 
-Identity: `(account_uuid, message_id, family_id)`.
+Schema/table removal is a separate migration ChangeSet.
 
-Meaning: explicit negative relation: this message must not be claimed by this family.
+### 2.7 Family Exemplar and Spam Network
 
-Production exact lookup respects this negative relation.
+Family exemplars are bounded fingerprint evidence. They may support diagnostics, historical compatibility and `SpamNetworkAnalyzer`.
 
-### 2.8 Family Exemplar
+Spam Network may relate multiple exact families by template/link/infrastructure/fingerprint similarity. It never defines or merges family identity.
 
-Implementation: `spam_family_exemplar`.
+### 2.8 Server Route State
 
-Meaning: bounded message fingerprint evidence stored for a family.
-
-In production exact-family identity, exemplars do not choose the family. They remain useful for diagnostics, network/template analysis and historical compatibility.
-
-### 2.9 Spam Network
-
-Implementation: `SpamNetworkAnalyzer` and fuzzy fingerprint similarity.
-
-Meaning: diagnostic/template/infrastructure relation across families.
-
-A Spam Network is **not** a Spam Family and may never own family identity.
-
-### 2.10 Server Route State
-
-Implementation: cPanel/UAPI read-back through `CpanelAliasActuator` / transaction helpers.
-
-Meaning: physical server truth about whether an alias is currently hard-rejected and what explicit routes exist.
-
-Local database intent is not server truth. Verification requires read-back.
+Physical SMTP truth comes from cPanel/UAPI read-back through `CpanelAliasActuator` and transaction helpers. Local requested state is not verified server state.
 
 ---
 
 ## 3. State ownership map
 
-| State / truth | Canonical owner | Mirrors / derived views | Forbidden substitute |
+| State / truth | Canonical owner | Mirror / derived view | Forbidden substitute |
 |---|---|---|---|
 | Message Spam/HAM/UNKNOWN | `spam_message.label` | `alias_delivery.label` when alias exists | folder placement |
-| Confirmed family membership | `spam_message.family_id` + family/exemplar state | `alias_delivery.family_id`; alias counters | fuzzy best-match |
-| Exact prediction | `spam_message.predicted_family_id` | alias delivery compatibility mirror | legacy fuzzy score |
-| Message visibility in Spam Control | `spam_message` | review/UI projections | `alias_delivery` existence |
-| Envelope alias observation | `alias` + `alias_delivery` | `spam_message.delivered_to` context | inferred sender address |
+| Confirmed family | `spam_message.family_id` + exact identity/family state | alias delivery + alias family counters | fuzzy best-match |
+| Exact prediction | `spam_message.predicted_family_id` | alias delivery prediction mirror | legacy fuzzy score |
+| Spam Control message visibility | `spam_message` | review/UI projections | alias existence |
+| Envelope alias observation | `alias` + `alias_delivery` | `spam_message.delivered_to` context | sender From-address |
 | Alias compromise lifecycle | `alias.state` | dashboard buckets | Spam label alone |
-| SMTP rejection lifecycle | `alias.smtp_reject_*` + server read-back | UI readiness | `COMPROMISED` state |
-| Family identity | normalized sender-name + subject mapping | family descriptor | body/template/link fuzziness |
-| Family exclusion | `spam_family_exclusion` | review/correction UI | temporary prediction clearing |
-| Physical route truth | cPanel read-back | local snapshot/audit metadata | requested operation |
-| Reply-from-alias desired address | incoming message `Envelope-To` | observed Alias Registry for capability validation | sender From-address |
+| SMTP rejection lifecycle | verified server read-back + `alias.smtp_reject_*` | UI/readiness | local COMPROMISED state |
+| Family identity | canonical sender-name + subject mapping | family descriptor | body/template/link fuzziness |
+| Legacy exclusion rows | recovery compatibility only | snapshots | exact-family authority |
+| Reply desired From alias | original envelope/recipient evidence resolved to `ref.deliveredto` | Alias Registry capability validation | sender From-address |
 
-**Ownership rule:** Adding a table/cache/mirror does not transfer authority unless this document and Decision Ledger explicitly declare a migration.
+**Ownership rule:** a table/cache/mirror does not gain authority because it exists. Authority changes require this model + Decision Ledger + migration + regression evidence.
 
 ---
 
 ## 4. Producer / consumer graph
 
-### 4.1 `spam_message`
+### `spam_message`
 
-**Producers**
+**Producers:** historical Inbox/Junk scan; live observation; explicit Spam/HAM; exact prediction/rescore; reset/undo restore.
 
-- `SpamHistoricalScanner` for retained Inbox/Junk;
-- normal `SpamIntelligence.observeMessage` on newly observed mail;
-- explicit Spam / Ikke spam through `SpamMessageStore.setLabel`;
-- exact-family refresh / rescoring for predictions;
-- reset/undo restore for learned fields.
+**Consumers:** global review queue/count; exact bulk; family inspection/stats; rescorer; snapshots; scan diagnostics.
 
-**Consumers**
+When alias enrichment exists, message learning must preserve alias counters, delivery mirror, traffic assessment and compromise-policy side effects.
 
-- global review queue and queue count;
-- family candidate UI;
-- exact bulk propagation;
-- rescorer paging;
-- learning snapshots and undo/reset;
-- scan before/after diagnostics;
-- family stats/correction paths as they complete canonical migration.
+### `alias` / `alias_delivery`
 
-**Required side effects when alias exists**
+**Producers:** envelope observation; historical enrichment; Spam/HAM mirror; traffic analysis; human alias lifecycle; cPanel operations.
 
-- alias spam/ham counters;
-- alias family counters;
-- alias delivery mirror;
-- traffic assessment refresh;
-- compromise policy evaluation when explicit spam is learned;
-- compromise-review metadata transitions.
+**Consumers:** alias dashboard; compromise workflow; reply-capability validation; cPanel readiness/burn/restore; optional suspicious-traffic review admission.
 
-### 4.2 `alias` / `alias_delivery`
+**Invariant:** failure to create an alias row never blocks canonical message classification/review/family/reset/undo.
 
-**Producers**
+### Exact family mapping
 
-- mail observation when `Envelope-To` exists;
-- historical scan enrichment;
-- explicit spam/ham mirror;
-- traffic analyzer / assessment;
-- human alias lifecycle actions;
-- cPanel burn/restore state transitions.
+**Producers:** first explicit SPAM for a complete identity; exact identity-level assignment with proven exact provenance; undo restore.
 
-**Consumers**
+**Consumers:** exact `matchIdentity`; exact bulk; optional exact auto-label; review provenance; family administration.
 
-- alias dashboard and unresolved/compromise workflows;
-- reply-capable alias lookup;
-- compromise policy;
-- cPanel readiness/burn/restore;
-- review admission only for the optional `SUSPICIOUS` evidence path.
+A one-message UI action is not permission to globally rebind an arbitrary canonical identity.
 
-**Invariant:** failure to produce an alias row must not block message classification, review, family identity, reset or undo.
+### cPanel server state
 
-### 4.3 Exact family mapping
+**Producer:** remote server.  
+**Consumers:** read-back verification, local verified SMTP state, rollback planning.
 
-**Producers**
+### Reply alias
 
-- first explicit SPAM learning for a complete identity;
-- explicit assignment into an existing family when human semantics allow it;
-- restore from undo snapshot.
+**Producer chain:** original envelope headers / original recipients / retained delivered-to evidence → resolved `ref.deliveredto` → per-message re-observation/alias synchronization.
 
-**Consumers**
+**Consumer chain:** `SpamIntelligence.resolveReplyExtra(context, selected, ref.deliveredto)` → `draft.extra` → FairEmail sender-extra From address.
 
-- `matchIdentity` production prediction;
-- exact bulk propagation;
-- auto-label exact when enabled;
-- review provenance validation;
-- family administration.
-
-### 4.4 cPanel server state
-
-**Producers**
-
-- remote cPanel server only.
-
-**Consumers**
-
-- verification/read-back;
-- local SMTP rejection state after verified operation;
-- rollback decisions.
+Spam classification/family state is not reply-alias authority.
 
 ---
 
-## 5. Behavioral model / state transitions
+## 5. Behavioral model
 
 ### 5.1 Message learning
 
@@ -261,104 +171,60 @@ spam_message UNKNOWN
     ├─ human Ikke spam ─────────────→ HAM
     ├─ human Spam ──────────────────→ SPAM + exact/isolated family
     └─ exact prediction ────────────→ UNKNOWN + predicted family
-                                         └─ optional auto-label policy → SPAM
+                                         └─ optional exact auto-label → SPAM
 ```
 
-Folder placement never performs UNKNOWN→HAM or UNKNOWN→SPAM by itself.
+Folder location never performs UNKNOWN→HAM or UNKNOWN→SPAM by itself.
 
 ### 5.2 Review admission
 
-An indexed message is review work when policy permits reviewed items and at least one admission reason exists:
+An indexed message becomes review work when policy permits and at least one admission reason exists:
 
-- it is in Junk; or
-- it has a revalidated exact family prediction; or
-- optional alias enrichment says traffic is `SUSPICIOUS`.
+- Junk placement; or
+- revalidated exact family prediction; or
+- optional alias enrichment reports suspicious traffic.
 
-`Envelope-To` is never required.
-
-Plain UNKNOWN Inbox with no other evidence is indexed but not automatically review work.
+`Envelope-To` is never required. Plain UNKNOWN Inbox with no other evidence remains indexed but is not automatically review work.
 
 ### 5.3 Explicit Spam
 
-Current intended transition:
-
-1. ensure canonical message row exists;
-2. derive deterministic family identity;
-3. learn into mapped exact family, or create/bind family;
-4. if identity incomplete, learn into isolated per-message family;
-5. set canonical `spam_message` SPAM + family;
-6. if alias delivery exists, mirror through `SpamAliasStore` preserving counters;
-7. reconcile family lifecycle;
-8. evaluate alias compromise using traffic/service/trusted-domain/alias-HAM evidence;
-9. refresh optional alias assessment;
-10. refresh exact family prediction;
-11. rescore affected family state.
+1. ensure canonical message row;
+2. derive canonical family identity;
+3. map/create exact family, or isolated family if identity incomplete;
+4. set canonical SPAM + family;
+5. mirror to alias state when present;
+6. reconcile family lifecycle;
+7. evaluate alias compromise from full evidence set;
+8. refresh derived assessment/prediction/rescore;
+9. exact bulk may propagate only to retained UNKNOWN messages whose canonical identity key equals the seed identity.
 
 ### 5.4 Explicit HAM
 
-Current intended transition:
+1. set canonical HAM and clear confirmed family;
+2. remove/reconcile prior SPAM exemplar/family state;
+3. mirror HAM to alias state when present;
+4. preserve HAM against exact bulk/rescore;
+5. refresh derived state.
 
-1. set canonical message HAM and clear confirmed family id;
-2. remove message exemplar / reconcile prior family if it was SPAM;
-3. if alias exists, mirror HAM counters and delivery label;
-4. preserve explicit HAM against later bulk propagation;
-5. refresh derived predictions/assessment.
+### 5.5 Family administration
 
-### 5.5 Exact bulk propagation
+Family membership is automatic from canonical identity. Administrative operations may rename, activate/deactivate, exact-rescan and inspect family messages.
 
-One human Spam decision may propagate only to retained **UNKNOWN** messages with the exact deterministic identity. Explicit HAM is a hard exception.
+The retired fuzzy-lab operations `Samme spam` / `Annen spam`, `confirmSpam`, `markOtherSpam`, message-level family exclusion and `SpamFamilyReassigner` are not production concepts.
 
-Propagation must reuse the normal Spam learning path so optional alias side effects remain intact.
+### 5.6 Alias compromise and SMTP burn
 
-### 5.6 Alias compromise
+SPAM and COMPROMISED are different truths. Compromise policy consumes Spam plus traffic/service/trusted-domain/sender/HAM context and yields KEEP / REVIEW / COMPROMISE.
 
-`SPAM` and `COMPROMISED` are different truths.
+COMPROMISED and verified SMTP hard rejection are also different truths. Burn/restore is preflight → mutation → read-back → verified local state. Ordinary email replies/bounces are not server hard rejection.
 
-Explicit spam feeds `AliasCompromisePolicy` with:
+### 5.7 Reset and Undo
 
-- explicitSpam=true;
-- current suspicious traffic verdict;
-- whether sender domain is known;
-- service/trusted-domain context;
-- whether sender matches expected context;
-- accumulated alias HAM evidence.
+Reset erases learned/derived Spam Control state while preserving FairEmail mail, canonical message visibility/raw observation, passive inventory required by contract, and physical server truth.
 
-Possible semantic outcomes: KEEP / REVIEW / COMPROMISE.
+Snapshots cover every mutable owner in the operation: messages, optional alias/delivery state, families/exemplars, legacy exclusion rows for compatibility, exact identity meta, compromise meta and affected derived state.
 
-### 5.7 SMTP burn
-
-`COMPROMISED` is local lifecycle evidence. `SMTP_REJECT_VERIFIED` is physical server state.
-
-Burn/restore follows preflight → mutation → read-back → verified local state. Ordinary reply-email bounces are not equivalent to server hard rejection.
-
-### 5.8 Reset
-
-Reset means **erase learned/derived Spam Control state while preserving raw visibility and passive inventory required by the defined contract**.
-
-It must preserve:
-
-- FairEmail mail;
-- canonical `spam_message` rows / raw observation context;
-- passive alias inventory and manually configured domain context unless explicitly declared otherwise;
-- server truth / cPanel state.
-
-It clears/restores through semantic snapshots:
-
-- message labels/family predictions;
-- delivery learned fields;
-- alias learned counters/state covered by snapshot contract;
-- families/exemplars/exclusions;
-- exact identity meta;
-- compromise-review meta;
-- derived rescore work.
-
-Reset itself is undoable.
-
-### 5.9 Undo
-
-Undo is semantic, persistent and account-local for normal account actions.
-
-The snapshot is captured **before** mutation. History is marked undone only after restore succeeds. Restored accounts are rescored afterwards.
+Undo snapshots **before** mutation and marks history undone only after restore succeeds. Reset itself is undoable.
 
 ---
 
@@ -366,262 +232,159 @@ The snapshot is captured **before** mutation. History is marked undone only afte
 
 ### MESSAGE
 
-**INV-M01** Every retained message selected for Spam Control import can exist in `spam_message` without `Envelope-To`.
-
-**INV-M02** Junk is review evidence, not automatic SPAM truth.
-
-**INV-M03** Inbox is context, not automatic HAM truth.
-
-**INV-M04** Explicit HAM is never overwritten by exact bulk propagation.
-
-**INV-M05** Canonical message learning succeeds independently of alias availability.
+- **INV-M01** Retained Spam Control messages can exist without `Envelope-To`.
+- **INV-M02** Junk is review evidence, not automatic SPAM.
+- **INV-M03** Inbox is context, not automatic HAM.
+- **INV-M04** Explicit HAM is never overwritten by exact bulk/rescore.
+- **INV-M05** Canonical learning succeeds without alias enrichment.
 
 ### FAMILY
 
-**INV-F01** Production family identity = normalized sender display name + normalized subject.
+- **INV-F01** Family identity = normalized sender display name + normalized subject.
+- **INV-F02** Same complete canonical identity → same family. No per-message family exception.
+- **INV-F03** Same name + different subject → different identity/family.
+- **INV-F04** Different name + same subject → different identity/family.
+- **INV-F05** Incomplete identity → isolated per-message family, never fuzzy join.
+- **INV-F06** Fuzzy similarity belongs to Spam Network/diagnostics, never family authority.
+- **INV-F07** Disabled family is not an automatic exact match.
+- **INV-F08** Legacy exclusion rows cannot suppress exact `matchIdentity()`.
+- **INV-F09** One-message UI actions cannot silently globally rebind an arbitrary exact identity.
 
-**INV-F02** Same name + same subject → same identity family unless an explicit human override relation says otherwise.
+### ALIAS / SERVER
 
-**INV-F03** Same name + different subject → different identity.
-
-**INV-F04** Different name + same subject → different identity.
-
-**INV-F05** Missing complete identity → isolated message family, never fuzzy join.
-
-**INV-F06** Fuzzy body/template/link/sender-address similarity may power Spam Network diagnostics; it may never own production family identity.
-
-**INV-F07** Disabled/inactive family is not an automatic exact match; reactivation must be an explicit lifecycle consequence of valid learning/admin behavior.
-
-**INV-F08** A human family correction must not be silently reversed by automatic relearning in the same action.
-
-### ALIAS
-
-**INV-A01** Alias enrichment is additive. It may never become the admission ticket to Spam Control message truth.
-
-**INV-A02** When alias delivery exists, legacy spam/ham/family counter side effects must be preserved unless Decision Ledger explicitly retires them.
-
-**INV-A03** Spam does not imply compromised alias.
-
-**INV-A04** `SMTP-DEAD` / verified hard rejection is not synonymous with `COMPROMISED`.
+- **INV-A01** Alias enrichment is additive, never an admission gate for message truth.
+- **INV-A02** Existing alias side effects/counters survive canonical message learning.
+- **INV-A03** Spam does not imply compromised alias.
+- **INV-A04** COMPROMISED does not imply verified SMTP hard rejection.
+- **INV-A05** Server mutation is not verified until read-back proves remote state.
 
 ### RECOVERY
 
-**INV-R01** Every human action that fans out across learned state snapshots every state owner it can mutate.
+- **INV-R01** Every mutating human/automation action snapshots every state owner it can mutate.
+- **INV-R02** Reset preserves canonical message visibility and raw mail.
+- **INV-R03** Undo restores before history is marked undone.
+- **INV-R04** Schema compatibility state is not removed inside an unrelated semantic retirement.
 
-**INV-R02** Reset must not delete canonical message visibility.
+### OBSERVABILITY
 
-**INV-R03** Undo restores before history is marked undone.
-
-**INV-R04** Reset and undo do not mutate mail bodies/raw EML.
-
-### INTEGRATION / OBSERVABILITY
-
-**INV-O01** Historical scan logs raw examined, canonical indexed/new, alias enriched/new, Inbox/Junk, missing Envelope-To and missing folder.
-
-**INV-O02** cPanel logs sanitized request/response shape before throwing parser/shape errors.
-
-**INV-O03** Credentials, Authorization headers, passwords and mail bodies are never written to Spam Control diagnostics.
+- **INV-O01** Historical scan reports raw examined, canonical indexed/new, alias enriched/new, folders and missing Envelope-To/folder.
+- **INV-O02** cPanel logs sanitized request/response shape before parser/shape failure.
+- **INV-O03** Credentials, Authorization values, passwords and mail bodies never enter Spam Control diagnostics.
 
 ### REPLY ALIAS
 
-**INV-P01** Reply-to-mail uses the incoming `Envelope-To` alias as the desired From alias when it is valid/reply-capable.
-
-**INV-P02** Spam Control changes must not regress reply-from-alias behavior.
+- **INV-P01** Original envelope evidence outranks later routing `Delivered-To` when recovering the reply alias.
+- **INV-P02** The resolved original delivery alias becomes `ref.deliveredto` and is re-observed before reply-extra resolution.
+- **INV-P03** `resolveReplyExtra` uses `ref.deliveredto`, and the resolved extra is written to the draft.
+- **INV-P04** Spam Control family/classification refactors may not redefine reply-alias authority.
 
 ---
 
-## 7. Forbidden / impossible states
+## 7. Forbidden states
 
-The following states are semantically invalid even if Java/Room can represent them:
+The following are invalid even if Java/Room can represent them:
 
-1. a Junk message with no `Envelope-To` being invisible solely because no alias row exists;
-2. a fuzzy prediction presented as exact-family provenance;
-3. explicit HAM later relabeled SPAM by bulk propagation without a new human action;
-4. local `COMPROMISED` being presented as verified SMTP hard rejection;
-5. cPanel mutation marked verified without read-back;
-6. reset deleting the canonical message index or raw mail;
-7. `Other spam` action ending in the same excluded family because exact relearning ignored the human correction;
-8. one human action creating multiple undo points because of rapid duplicate UI execution;
-9. a UI work bucket with no exit action unless it is deliberately read-only and labeled as such.
+1. a retained Junk message is invisible solely because no alias row exists;
+2. fuzzy/template similarity is presented as exact-family provenance;
+3. explicit HAM is changed to SPAM by bulk/rescore without a new explicit human action;
+4. two complete equal canonical family identities are split by a per-message legacy exclusion;
+5. a one-message action silently rebinds future/twin messages to an arbitrary family;
+6. local COMPROMISED is presented as verified SMTP hard rejection;
+7. cPanel mutation is marked verified without read-back;
+8. reset deletes raw mail or canonical message index;
+9. one user action creates multiple undo points through duplicate execution;
+10. a UI work bucket has no exit action unless deliberately read-only and labeled;
+11. a Spam Control refactor breaks reply-from-alias while its own tests remain green.
 
 ---
 
 ## 8. Recovery semantics
 
-| Operation | Snapshot scope | Must survive | Must rebuild/refresh |
+| Operation | Snapshot scope | Must survive | Refresh after restore |
 |---|---|---|---|
-| Spam / Ikke spam single message | message + affected families + exact/compromise meta + optional delivery/alias | raw message observation | family prediction / affected rescore |
-| Exact bulk Spam | full account learned state | raw account message index | affected/all active family rescore |
-| Alias lifecycle action | full account learned state where action can affect counters/meta | mail + server truth unless server action is part of operation | dashboard/assessment |
-| Reset all learning | full global learned state | raw mail, canonical index, passive inventory per contract, server state | rescore after undo |
-| cPanel burn | route snapshot + local server-action metadata | original routes until verified mutation | server read-back |
-| cPanel restore | stored route snapshot | intended pre-burn route semantics | server read-back |
+| Spam / Ikke spam | message + affected family/meta + optional alias/delivery | raw message observation | family prediction/rescore |
+| Exact bulk Spam | full affected learned account state | raw canonical message index | active-family rescore |
+| Alias lifecycle action | every touched alias/meta owner | mail; remote server truth unless operation explicitly mutates it | dashboard/assessment |
+| Reset learning | global learned state | raw mail, canonical message visibility, passive inventory/server truth per contract | active-family rescore |
+| cPanel burn/restore | local route snapshot + remote read-back | recoverable pre-operation route when safe path promised | verified SMTP state |
+
+No ChangeSet may delete recovery state before a replacement migration proves rollback and snapshot compatibility.
 
 ---
 
-## 9. Observability contract
+## 9. Verification architecture
 
-### Historical scan
+Semantic contracts currently protect:
 
-Must expose at minimum:
+- bootstrap / canonical message authority;
+- canonical message + alias side effects;
+- reset/undo state ownership;
+- scan/Terminal/cPanel observability;
+- exact-family legacy-retirement + exact bulk/auto-confirm provenance;
+- reply-from-alias authority chain;
+- meta-coverage proving each contract workflow triggers on every Java consumer it reads.
 
-```text
-SCAN START account=… inbox=… junk=…
-PAGE afterMessageId=… rows=…
-INDEX message=… folder=… new=… envelope=present|missing
-DONE examined=… messageIndexed=… messageNew=… aliasObserved=… aliasNew=… inbox=… junk=… noEnvelope=… missingFolder=…
-```
+Additional gates:
 
-UI before/after counts must come from canonical `DaoSpamMessage`, not alias ledger counts.
+- `Spam Family Core` pure-Java labs for family identity/prediction/scoring/alias/cPanel invariants;
+- `Spam Intelligence Android Compile` for Java+Room compile, migration verification, APK assembly, pinned signer and checksummed artifact;
+- Spam Control entrypoint audit proving `ActivitySpamControl` is the sole runtime entrypoint.
 
-### cPanel
-
-Before UAPI shape validation fails, diagnostics must expose sanitized:
-
-- module/function and final endpoint;
-- HTTP status;
-- Content-Type;
-- top-level JSON keys;
-- sanitized response body at trace level;
-- explicit distinction between UAPI `result`, legacy API2 `cpanelresult`, and WHM/API `metadata/data` shapes.
-
-### Human actions
-
-The system must retain enough action history to explain what user truth changed and support account-local undo.
+A green test on a different commit is not evidence for the candidate. Release evidence is tied to one exact candidate SHA.
 
 ---
 
-## 10. Semantic verification matrix
+## 10. Resolved archaeology — exact family correction retirement
 
-| Case | Expected semantic result | Mechanical owner |
-|---|---|---|
-| Junk + no Envelope-To + UNKNOWN + no family | visible in review | bootstrap contract |
-| Junk + Envelope-To + UNKNOWN | visible in review | bootstrap contract |
-| Inbox + UNKNOWN + no evidence | indexed, not automatically review/HAM | bootstrap contract |
-| Inbox + suspicious alias evidence | review candidate | bootstrap contract |
-| exact prediction | review candidate after exact provenance revalidation | repository/runtime contract |
-| human Spam with no alias row | canonical SPAM/family succeeds | alias-sideeffect contract |
-| human Spam with alias row | canonical truth + old alias counters/policy | alias-sideeffect contract |
-| human HAM | canonical HAM; bulk may not overwrite | bootstrap + bulk contract |
-| reset | message index remains; learning clears | reset/undo contract |
-| undo | full affected semantic state restored before history marked undone | reset/undo contract |
-| cPanel unexpected response shape | Terminal explains actual shape | observability contract |
-| exact family same name+subject | same family | spam-family core |
-| exact family same name+different subject | different family | spam-family core |
-| exact family different name+same subject | different family | spam-family core |
-| missing family identity | isolated family | spam-family core |
-| reply to catchall alias | exact Envelope-To local-part becomes From extra | reply-alias regression |
+The old `ActivitySpamFamilyLab` was introduced as a `githubDebug` review surface and later retained as a non-exported fallback only while the new dashboard was exercised. Caller/reachability archaeology proved:
+
+- no app code launched it;
+- `confirmSpam`, `markOtherSpam`, `SpamFamilyHumanActions` and `SpamFamilyReassigner` were confined to that correction island;
+- `Samme spam / Annen spam` expressed the prior fuzzy-family classifier model;
+- the main dashboard already contained the legitimate migrated capabilities: global Spam/HAM review, family list/rename/activation, exact rescan, read-only family inspection, undo/reset/details and separate Spam Network analysis.
+
+Decision:
+
+- the fuzzy correction island is retired rather than adapted;
+- exact identity is definitional;
+- legacy exclusion storage remains inert for rollback/snapshot compatibility;
+- no new per-message exact-family override is introduced.
+
+Runtime implementation landed in `fcd3fce536fe770c084922d7187b58a16fb18555`.
 
 ---
 
-## 11. Architecture map
+## 11. Remaining open migration gaps
 
-```text
-FairEmail main DB / retained mail
-        │
-        ├── live observation ────────────────┐
-        └── historical Inbox/Junk scanner ──┤
-                                            ▼
-                                  SpamMessageStore
-                                            │
-                                            ▼
-                                  spam_message  ← canonical message truth
-                                            │
-                      ┌─────────────────────┼─────────────────────┐
-                      │                     │                     │
-                      ▼                     ▼                     ▼
-                 Review Queue          Exact Family         Undo / Reset
-                                            │
-                         sender-name + subject identity
-                                            │
-                                            ▼
-                                 family identity mapping
-                                            │
-                             ┌──────────────┴──────────────┐
-                             ▼                             ▼
-                        spam_family                    exclusions
-                             │
-                             ▼
-                         exemplars ─── fuzzy/network diagnostics only
+### OPEN-GAP-01 — remaining legacy DAO/query surfaces
 
-Envelope-To present
-        │
-        ▼
-Alias Registry / alias_delivery  ← optional enrichment + compatibility mirror
-        │
-        ├── traffic assessment
-        ├── spam/ham/family counters
-        ├── compromise policy
-        ├── reply-capable alias knowledge
-        └── cPanel lifecycle
-                 │
-                 ▼
-          cPanel remote read-back  ← physical server truth
-```
+Some `DaoSpamFamily` / compatibility queries still operate on alias-delivery-era structures. Each remaining path must be classified as legitimate alias mirror/diagnostic/recovery state or migrated to canonical message truth. Do not mass-replace DAO calls.
 
-Dependency direction rule: optional alias state may enrich canonical message behavior; canonical message existence must not depend on alias state.
+### OPEN-GAP-02 — physical removal of legacy exclusion schema
+
+`spam_family_exclusion` is now inert for production exact matching but remains part of DB/snapshot compatibility. Removing it requires a dedicated Room/schema/snapshot migration with rollback evidence.
+
+### OPEN-GAP-03 — artifact checksum manifest path
+
+The Android artifact currently writes a CI-internal path into `SHA256SUMS.txt`; after extracting the artifact at its root, direct `sha256sum -c SHA256SUMS.txt` may not resolve that original CI path. APK digest/signing are independently verified; artifact self-verification UX belongs in a separate scoped ChangeSet.
 
 ---
 
-## 12. Current archaeological findings / open migration gaps
+## 12. Change discipline
 
-These are **not** declared finished merely because the app compiles.
-
-### OPEN-GAP-01 — `confirmSpam` still has alias ownership leakage
-
-`SpamFamilyLabRepository.confirmSpam()` decides reassign need from `alias_delivery` and validates success by reading `alias_delivery`. Aliasless canonical messages therefore cannot be treated as fully migrated through this path.
-
-### OPEN-GAP-02 — `excludeFromFamily` still requires alias delivery
-
-`SpamIntelligence.excludeFromFamily()` returns false when `alias_delivery` is absent. Exclusion is a message↔family relation and therefore should not semantically require alias enrichment.
-
-### OPEN-GAP-03 — `Other spam` conflicts with exact identity learning
-
-Historical meaning is correct: **spam, but not this family**.
-
-Current implementation is alias-led and performs exclusion/clear/relearn. `matchIdentity()` respects exclusion, but `learnSpamExact()` follows the persistent identity mapping directly. Relearning can therefore contradict the human correction.
-
-This requires an explicit human-override model before code modification. Do not solve by re-enabling fuzzy family identity.
-
-### OPEN-GAP-04 — `SpamFamilyReassigner` is alias-canonical
-
-Reassign currently requires `alias_delivery` and `alias`, moves alias counters and delivery family, and its post-commit prediction refresh uses the legacy fuzzy matcher. It does not currently express `spam_message` as the primary message truth.
-
-Migration must preserve:
-
-- exemplar movement;
-- optional alias family counters;
-- canonical message family;
-- alias delivery mirror when present;
-- exclusions;
-- family confirmed counts/lifecycle;
-- prediction clearing/rescore behavior;
-- exact identity semantics.
-
-### OPEN-GAP-05 — legacy DAO/query surfaces remain
-
-Some `DaoSpamFamily` / compatibility paths still operate on alias delivery. Each must be classified as either legitimate alias mirror/diagnostic or a consumer that must migrate to message truth.
-
-### OPEN-GAP-06 — artifact checksum manifest path
-
-The Android artifact currently writes a CI-internal path into `SHA256SUMS.txt`; after unzip at artifact root, direct `sha256sum -c SHA256SUMS.txt` cannot resolve that path. APK digest is correct, but artifact self-verification UX should be corrected in a separate scoped ChangeSet.
-
----
-
-## 13. Change discipline
-
-Before any OPEN-GAP is changed:
+Before changing an open gap or ownership boundary:
 
 1. identify the human/domain meaning;
 2. identify all current state owners;
 3. map producers, consumers and side effects;
-4. read the phone baseline/current history for why the path exists;
-5. state the target semantic transition here or in Decision Ledger;
+4. inspect current code + relevant history/baselines for why the path exists;
+5. record the decision in this model / Decision Ledger;
 6. define the regression matrix first;
-7. create a safety/ChangeSet branch;
-8. change one ownership boundary at a time;
-9. run semantic contracts + Android/Room/migration gate when relevant;
-10. compare baseline→candidate;
-11. verify the real phone workflow before declaring the migration complete.
+7. work on a scoped ChangeSet branch with explicit allowed/forbidden files;
+8. migrate additively before substitution/destruction;
+9. preserve recovery/rollback state until replacement equivalence is proven;
+10. run semantic contracts + relevant core/Android/Room gates on the exact candidate SHA;
+11. compare base→candidate and reject out-of-scope drift;
+12. verify the real phone workflow before declaring user-facing completion.
 
-If any step is unknown, the next action is archaeology/modeling, not patching.
+If a semantic fact is unknown, the next action is archaeology/modeling, not patching.

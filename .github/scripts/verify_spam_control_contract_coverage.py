@@ -2,10 +2,8 @@
 """Prove that Spam Control semantic contracts are actually wired to their consumers.
 
 A semantic test that does not run when the source it protects changes is not a
-contract. This verifier derives Java consumers from each contract script and
-checks that its workflow's push paths cover every consumer, plus the script and
-workflow themselves. It also requires the operational branch and the active
-functional ChangeSet branch.
+contract. Derive Java consumers from each contract script and verify workflow
+branch/path coverage mechanically.
 """
 from __future__ import annotations
 
@@ -38,6 +36,10 @@ CONTRACTS = {
         ".github/scripts/verify_spam_exact_family_retirement.py",
         ".github/workflows/verify-spam-exact-family-retirement.yml",
     ),
+    "reply-alias-authority": (
+        ".github/scripts/verify_reply_alias_authority.py",
+        ".github/workflows/verify-reply-alias-authority.yml",
+    ),
 }
 
 
@@ -67,9 +69,6 @@ def yaml_list(text: str, key: str) -> list[str]:
 
 
 def consumed_java_paths(script_text: str) -> set[str]:
-    # Contracts currently name Java consumers either directly through ROOT / 'app/...java'
-    # or through a small read("app/...java") helper. Derive both forms so adding a source
-    # consumer to a contract cannot silently outrun its workflow trigger coverage.
     paths = set(re.findall(
         r"ROOT\s*/\s*['\"](app/src/[^'\"]+\.java)['\"]",
         script_text,

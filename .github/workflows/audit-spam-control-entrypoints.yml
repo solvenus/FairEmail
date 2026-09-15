@@ -1,11 +1,16 @@
+# Post-retirement final-head gate
 name: Audit Spam Control entrypoints
 
 on:
   push:
     branches:
       - feature/spam-control-p0
+      - changeset/spam-control-family-correction-semantics
     paths:
       - '.github/workflows/audit-spam-control-entrypoints.yml'
+      - 'app/src/githubDebug/AndroidManifest.xml'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamControl.java'
+      - 'app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java'
   workflow_dispatch:
 
 permissions:
@@ -16,22 +21,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-      - name: Prove old lab has no competing internal entrypoint
+      - name: Prove Spam Control has one runtime entrypoint
         run: |
           set -euo pipefail
-          OUT="$(mktemp)"
-          git grep -n 'ActivitySpamFamilyLab' -- app \
-            ':!app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java' \
-            ':!app/src/githubDebug/AndroidManifest.xml' > "$OUT" || true
-          if [ -s "$OUT" ]; then
-            echo 'Unexpected references to old Spam Family Lab:' >&2
-            cat "$OUT" >&2
+          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml
+          grep -F '<action android:name="android.intent.action.MAIN" />' app/src/githubDebug/AndroidManifest.xml
+          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml
+          if git grep -n -F 'ActivitySpamFamilyLab' -- app/src; then
+            echo 'Legacy Spam Family Lab must not exist in runtime source or manifest' >&2
             exit 1
           fi
-          echo 'PASS: old lab is not linked from any other app source'
-
-          grep -F 'android:name=".ActivitySpamControl"' app/src/githubDebug/AndroidManifest.xml
-          grep -F '<category android:name="android.intent.category.LAUNCHER" />' app/src/githubDebug/AndroidManifest.xml
-          grep -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml
-          grep -A4 -F 'android:name=".ActivitySpamFamilyLab"' app/src/githubDebug/AndroidManifest.xml | grep -F 'android:exported="false"'
-          echo 'PASS: ActivitySpamControl is launcher; old lab is non-exported fallback only'
+          echo 'PASS: ActivitySpamControl is the sole Spam Control runtime entrypoint'

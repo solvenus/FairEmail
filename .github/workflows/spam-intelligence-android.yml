@@ -1,4 +1,4 @@
-# Gate trigger: canonical Spam message state + Terminal observability
+# Post-retirement final-head gate: Android/Room/APK/signing evidence
 name: Spam Intelligence Android Compile
 
 on:
@@ -6,12 +6,12 @@ on:
     branches:
       - feature/spam-families
       - feature/spam-control-p0
+      - changeset/spam-control-family-correction-semantics
     paths:
       - 'app/src/github/AndroidManifest.xml'
       - 'app/src/githubDebug/AndroidManifest.xml'
       - 'app/src/github/java/eu/faircode/email/ApplicationSecure.java'
       - 'app/src/main/java/eu/faircode/email/ActivitySpamControl.java'
-      - 'app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java'
       - 'app/src/main/java/eu/faircode/email/FragmentCompose.java'
       - 'app/src/main/java/eu/faircode/email/AliasBackfill.java'
       - 'app/src/main/java/eu/faircode/email/AliasBurnManager.java'
