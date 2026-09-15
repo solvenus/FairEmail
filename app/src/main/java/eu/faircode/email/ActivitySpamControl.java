@@ -582,6 +582,25 @@ public class ActivitySpamControl extends ActivityBase {
         state.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
         content.addView(state, matchWrap());
 
+        if (candidate.overallReasons != null &&
+                candidate.overallReasons.contains("conflicting_evidence")) {
+            TextView conflict = bodyText("⚠ KONFLIKT I EVIDENS\n" +
+                    "Spamstøtte " + percent(candidate.overallSpamSupport) +
+                    " · legitimitetsstøtte " + percent(candidate.overallHamSupport) +
+                    ". Ingen automatisk konklusjon — din vurdering avgjør.");
+            conflict.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            content.addView(conflict, matchWrapWithMargin(0, 7, 0, 0));
+        }
+
+        int identityTwins = reviewIdentityCount(candidate);
+        if (identityTwins > 1) {
+            TextView impact = bodyText("↳ Minst " + identityTwins +
+                    " meldinger i denne køsiden har samme eksakte spamidentitet. " +
+                    "Én Spam-avgjørelse lærer identiteten og kan rydde flere historiske treff.");
+            impact.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
+            content.addView(impact, matchWrapWithMargin(0, 7, 0, 0));
+        }
+
         content.addView(fieldLabel("EMNE"), matchWrapWithMargin(0, 12, 0, 0));
         content.addView(valueText(empty(candidate.subject, "(uten emne)"), 22f, true), matchWrap());
 
@@ -665,6 +684,28 @@ public class ActivitySpamControl extends ActivityBase {
 
         card.addView(content, matchWrap());
         return card;
+    }
+
+    private int reviewIdentityCount(SpamFamilyLabRepository.Candidate candidate) {
+        if (candidate == null)
+            return 0;
+        SenderParts sender = senderParts(candidate.sender);
+        SpamFamilyIdentity.Identity identity = SpamFamilyIdentity.fromRaw(
+                sender == null ? null : sender.name, candidate.subject);
+        if (identity == null)
+            return 1;
+
+        int count = 0;
+        for (SpamFamilyLabRepository.Candidate other : reviewQueue) {
+            if (other == null)
+                continue;
+            SenderParts otherSender = senderParts(other.sender);
+            SpamFamilyIdentity.Identity otherIdentity = SpamFamilyIdentity.fromRaw(
+                    otherSender == null ? null : otherSender.name, other.subject);
+            if (otherIdentity != null && identity.key.equals(otherIdentity.key))
+                count++;
+        }
+        return Math.max(1, count);
     }
 
     private void runReviewAction(SpamFamilyLabRepository.Candidate candidate, boolean spam) {
