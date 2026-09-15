@@ -1218,8 +1218,11 @@ public class ActivitySpamControl extends ActivityBase {
         executor.execute(() -> {
             AliasBurnManager.Outcome outcome = AliasBurnManager.burn(
                     getApplicationContext(), account.uuid, alias.address,
-                    new CpanelAliasActuator(config, allowUnsafe),
+                    new CpanelAliasActuator(getApplicationContext(), config, allowUnsafe),
                     AliasBurnManager.DEFAULT_FAILURE_MESSAGE);
+            SpamControlLog.i(getApplicationContext(), "SMTP-BURN",
+                    "alias=" + alias.address + " unsafe=" + allowUnsafe +
+                            " success=" + outcome.success + " error=" + outcome.error);
             runOnUiThread(() -> {
                 if (!isSelected(account))
                     return;
@@ -1683,6 +1686,29 @@ public class ActivitySpamControl extends ActivityBase {
         cpanel.addView(cb, matchWrap());
         llPage.addView(cpanel, matchWrapWithMargin(0, 0, 0, 12));
 
+        CardView diagnostics = card(10, 1);
+        LinearLayout dl = cardBody(14, 12);
+        dl.addView(valueText("Diagnostikklogg", 17f, true), matchWrap());
+        dl.addView(bodyText("Persistent lokal logg for historisk skann, cPanel/UAPI og serverhandlinger. API-token og Authorization-header logges ikke."),
+                matchWrapWithMargin(0, 5, 0, 0));
+        Button viewLog = secondaryButton("Vis diagnostikklogg");
+        viewLog.setOnClickListener(v -> showDiagnosticsLog());
+        dl.addView(viewLog, matchWrapWithMargin(0, 7, 0, 0));
+        LinearLayout logRow = new LinearLayout(this);
+        logRow.setOrientation(LinearLayout.HORIZONTAL);
+        Button shareLog = secondaryButton("Del logg");
+        shareLog.setOnClickListener(v -> shareDiagnosticsLog());
+        logRow.addView(shareLog, weightedButton());
+        Button clearLog = secondaryButton("Tøm logg");
+        clearLog.setOnClickListener(v -> {
+            SpamControlLog.clear(getApplicationContext());
+            tvStatus.setText("Diagnostikkloggen er tømt.");
+        });
+        logRow.addView(clearLog, weightedButton());
+        dl.addView(logRow, matchWrapWithMargin(0, 5, 0, 0));
+        diagnostics.addView(dl, matchWrap());
+        llPage.addView(diagnostics, matchWrapWithMargin(0, 0, 0, 12));
+
         CardView data = card(10, 1);
         LinearLayout db = cardBody(14, 12);
         db.addView(valueText("Data og læring", 17f, true), matchWrap());
@@ -1783,21 +1809,68 @@ public class ActivitySpamControl extends ActivityBase {
         tvStatus.setText("Skanner eksisterende " +
                 (inbox && junk ? "Spam + Innboks" : junk ? "Spam" : "Innboks") + " …");
         executor.execute(() -> {
+            DaoAlias dao = SpamIntelligenceDB.getInstance(getApplicationContext()).alias();
+            boolean includeReviewed = !SpamControlPolicy.hideReviewed(getApplicationContext());
+            int beforeReview = dao.countReviewQueue(account.uuid, includeReviewed);
+            List<EntityAlias> beforeAliasesList = dao.getAliases(account.uuid);
+            int beforeAliases = beforeAliasesList == null ? 0 : beforeAliasesList.size();
+
             SpamHistoricalScanner.Result result = SpamHistoricalScanner.scan(
                     getApplicationContext(), account, inbox, junk);
+
+            int afterReview = dao.countReviewQueue(account.uuid, includeReviewed);
+            List<EntityAlias> afterAliasesList = dao.getAliases(account.uuid);
+            int afterAliases = afterAliasesList == null ? 0 : afterAliasesList.size();
+            String sources = inbox && junk ? "Spam + Innboks" : junk ? "Spam" : "Innboks";
+            SpamControlLog.i(getApplicationContext(), "SCAN",
+                    "UI RESULT sources=" + sources +
+                            " review=" + beforeReview + "->" + afterReview +
+                            " aliases=" + beforeAliases + "->" + afterAliases +
+                            " examined=" + result.examined + " observed=" + result.observed +
+                            " new=" + result.newlyImported +
+                            " noEnvelope=" + result.skippedNoEnvelope +
+                            " missingFolder=" + result.missingFolder);
+
             runOnUiThread(() -> {
                 if (!isSelected(account) || isFinishing() || isDestroyed())
                     return;
                 if (result.success) {
-                    tvStatus.setText("Historisk skann ferdig · " + result.examined +
-                            " lest · " + result.newlyImported + " nye observasjoner · " +
-                            result.junk + " Spam · " + result.inbox + " Innboks" +
-                            (result.skippedNoEnvelope > 0
-                                    ? " · " + result.skippedNoEnvelope + " uten Envelope-To" : ""));
+                    StringBuilder report = new StringBuilder();
+                    report.append("Kilde: ").append(sources)
+                            .append("\nLest: ").append(result.examined)
+                            .append("\nRe-evaluert med Envelope-To: ").append(result.observed)
+                            .append("\nNye observasjoner: ").append(result.newlyImported)
+                            .append("\nAllerede kjent / re-evaluert: ")
+                            .append(Math.max(0, result.observed - result.newlyImported))
+                            .append("\nSpam-mappe: ").append(result.junk)
+                            .append("\nInnboks: ").append(result.inbox)
+                            .append("\nUten Envelope-To: ").append(result.skippedNoEnvelope)
+                            .append("\nMangler mappe: ").append(result.missingFolder)
+                            .append("\n\nGjennomgangskø: ").append(beforeReview)
+                            .append(" → ").append(afterReview)
+                            .append("\nAliaser: ").append(beforeAliases)
+                            .append(" → ").append(afterAliases);
+                    if (result.newlyImported == 0 && beforeReview == afterReview && beforeAliases == afterAliases)
+                        report.append("\n\nIngen ny synlig state ble opprettet. Dette betyr vanligvis at AliasBackfill allerede hadde importert de samme meldingene. Se Diagnostikklogg for detaljene.");
+
+                    tvStatus.setText("Historisk skann ferdig · kø " + beforeReview + " → " + afterReview);
+                    AlertDialog.Builder dialog = new AlertDialog.Builder(this)
+                            .setTitle("Historisk skann ferdig")
+                            .setMessage(report.toString())
+                            .setNegativeButton(android.R.string.ok, null);
+                    if (afterReview > 0)
+                        dialog.setPositiveButton("Åpne Gjennomgang", (d, w) -> setSection(Section.REVIEW));
+                    dialog.show();
                     loadReviewQueue(account, true);
                     loadDashboardExtras(account);
-                } else
+                } else {
                     tvStatus.setText("Historisk skann feilet: " + result.error);
+                    new AlertDialog.Builder(this)
+                            .setTitle("Historisk skann feilet")
+                            .setMessage(result.error + "\n\nSe Diagnostikklogg for detaljene.")
+                            .setPositiveButton(android.R.string.ok, null)
+                            .show();
+                }
             });
         });
     }
@@ -1937,6 +2010,33 @@ public class ActivitySpamControl extends ActivityBase {
         });
     }
 
+    private void showDiagnosticsLog() {
+        String log = SpamControlLog.read(getApplicationContext());
+        TextView text = bodyText(TextUtils.isEmpty(log) ? "Diagnostikkloggen er tom." : log);
+        text.setTextIsSelectable(true);
+        text.setTypeface(Typeface.MONOSPACE);
+        text.setPadding(dp(12), dp(8), dp(12), dp(8));
+        ScrollView scroll = new ScrollView(this);
+        scroll.addView(text, new ScrollView.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        new AlertDialog.Builder(this)
+                .setTitle("Spamkontroll diagnostikk")
+                .setView(scroll)
+                .setNegativeButton(android.R.string.ok, null)
+                .setPositiveButton("Del", (d, w) -> shareDiagnosticsLog())
+                .show();
+    }
+
+    private void shareDiagnosticsLog() {
+        String log = SpamControlLog.read(getApplicationContext());
+        Intent share = new Intent(Intent.ACTION_SEND);
+        share.setType("text/plain");
+        share.putExtra(Intent.EXTRA_SUBJECT, "Spamkontroll diagnostikk");
+        share.putExtra(Intent.EXTRA_TEXT, TextUtils.isEmpty(log)
+                ? "Diagnostikkloggen er tom." : log);
+        startActivity(Intent.createChooser(share, "Del Spamkontroll-logg"));
+    }
+
     private void testCpanelConnection() {
         CpanelAliasActuator.Config config = SpamControlPolicy.cpanelConfig(this);
         if (config == null) {
@@ -1956,7 +2056,13 @@ public class ActivitySpamControl extends ActivityBase {
         tvStatus.setText("Tester cPanel med leseoperasjoner …");
         executor.execute(() -> {
             CpanelAliasActuator.Diagnostic diagnostic =
-                    new CpanelAliasActuator(config).diagnose(sampleAddress);
+                    new CpanelAliasActuator(getApplicationContext(), config).diagnose(sampleAddress);
+            SpamControlLog.i(getApplicationContext(), "CPANEL",
+                    "DIAGNOSTIC success=" + diagnostic.success +
+                            " sample=" + sampleAddress +
+                            " routes=" + diagnostic.exactRouteCount +
+                            " homeKnown=" + diagnostic.homeDirectoryKnown +
+                            " error=" + diagnostic.error);
             runOnUiThread(() -> {
                 if (isFinishing() || isDestroyed())
                     return;
