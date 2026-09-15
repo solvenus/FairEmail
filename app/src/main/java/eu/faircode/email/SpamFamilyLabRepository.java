@@ -13,13 +13,17 @@ import android.content.Context;
 
 import androidx.lifecycle.LiveData;
 
+import org.json.JSONArray;
+
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import javax.mail.Address;
 
-/** Read/write facade for the observer-first Spam Family Lab UI. */
+/** Read/write facade for the human-facing Spam Control UI. */
 public final class SpamFamilyLabRepository {
     public static final double STRONG_THRESHOLD = SpamFamilyEngine.DEFAULT_DETECT_THRESHOLD;
     private static final int MAX_CANDIDATES = 500;
@@ -53,12 +57,14 @@ public final class SpamFamilyLabRepository {
 
         int limit = Math.max(1, Math.min(MAX_CANDIDATES, requestedLimit));
         String account = accountUuid.trim();
-        List<EntityAliasDelivery> deliveries = SpamIntelligenceDB.getInstance(context)
-                .family().getFamilyCandidates(account, familyId, limit);
+        SpamIntelligenceDB intelligence = SpamIntelligenceDB.getInstance(context);
+        List<EntityAliasDelivery> deliveries = intelligence.family()
+                .getFamilyCandidates(account, familyId, limit);
         if (deliveries == null || deliveries.isEmpty())
             return Collections.emptyList();
 
         DB mail = DB.getInstance(context);
+        DaoAlias aliasDao = intelligence.alias();
         List<Candidate> result = new ArrayList<>(deliveries.size());
         for (EntityAliasDelivery delivery : deliveries) {
             if (delivery == null)
@@ -69,12 +75,19 @@ public final class SpamFamilyLabRepository {
             } catch (Throwable ex) {
                 Log.w(ex);
             }
-            result.add(Candidate.from(delivery, message, familyId));
+
+            EntityAlias alias = null;
+            try {
+                alias = aliasDao.getAlias(account, delivery.address);
+            } catch (Throwable ex) {
+                Log.w(ex);
+            }
+            result.add(Candidate.from(delivery, message, alias, familyId));
         }
         return result;
     }
 
-    /** Explicitly confirm this locally available message as spam in this exact family. */
+    /** Explicitly confirm this locally available message as spam in this exact group. */
     public static ActionResult confirmSpam(Context context,
                                            String accountUuid,
                                            long familyId,
@@ -109,7 +122,16 @@ public final class SpamFamilyLabRepository {
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
-    /** Explicit HAM correction. This is intentionally different from Not this family. */
+    /** Human statement: this is spam, but it belongs to a different spam group. */
+    public static ActionResult markOtherSpam(Context context,
+                                             String accountUuid,
+                                             long currentFamilyId,
+                                             long messageId) {
+        return SpamFamilyHumanActions.markOtherSpam(
+                context, accountUuid, currentFamilyId, messageId);
+    }
+
+    /** Explicit HAM correction. This means the message is not spam. */
     public static ActionResult markLegitimate(Context context,
                                               String accountUuid,
                                               long messageId) {
@@ -124,7 +146,7 @@ public final class SpamFamilyLabRepository {
                 ? ActionResult.APPLIED : ActionResult.REJECTED;
     }
 
-    /** Exclude this message/family pair without making a spam-vs-ham claim. */
+    /** Internal exact-group exclusion, kept for diagnostics and advanced correction paths. */
     public static ActionResult excludeFromFamily(Context context,
                                                  String accountUuid,
                                                  long familyId,
@@ -140,7 +162,7 @@ public final class SpamFamilyLabRepository {
             return ActionResult.FAMILY_MISSING;
 
         boolean accepted = SpamIntelligence.excludeFromFamily(
-                context, resolved.account, resolved.message, familyId, "family_lab");
+                context, resolved.account, resolved.message, familyId, "spam_control");
         int stored = SpamIntelligenceDB.getInstance(context).family()
                 .countExclusion(resolved.account.uuid, messageId, familyId);
         return accepted && stored > 0 ? ActionResult.APPLIED : ActionResult.REJECTED;
@@ -201,6 +223,25 @@ public final class SpamFamilyLabRepository {
         }
     }
 
+    private static String expectedDomains(EntityAlias alias) {
+        if (alias == null)
+            return null;
+        Set<String> domains = new LinkedHashSet<>();
+        if (alias.service_domain != null && !alias.service_domain.trim().isEmpty())
+            domains.add(alias.service_domain.trim());
+        try {
+            JSONArray trusted = new JSONArray(alias.trusted_domains == null ? "[]" : alias.trusted_domains);
+            for (int i = 0; i < trusted.length(); i++) {
+                String domain = trusted.optString(i, null);
+                if (domain != null && !domain.trim().isEmpty())
+                    domains.add(domain.trim());
+            }
+        } catch (Throwable ex) {
+            Log.w(ex);
+        }
+        return domains.isEmpty() ? null : android.text.TextUtils.join(", ", domains);
+    }
+
     public static final class Candidate {
         public final long messageId;
         public final long received;
@@ -210,11 +251,22 @@ public final class SpamFamilyLabRepository {
         public final boolean messagePresent;
 
         public final String alias;
+        public final String service;
+        public final String expectedDomains;
+        public final int aliasSpamHits;
+        public final int aliasHamHits;
+        public final int aliasState;
         public final String folderType;
         public final String senderDomain;
+        public final boolean hasUnsubscribe;
         public final int label;
         public final Long confirmedFamilyId;
         public final Long predictedFamilyId;
+
+        public final Double aliasSpamSupport;
+        public final Double aliasHamSupport;
+        public final String aliasVerdict;
+        public final String aliasReasons;
 
         public final Double score;
         public final Double raw;
@@ -235,11 +287,21 @@ public final class SpamFamilyLabRepository {
                           String preview,
                           boolean messagePresent,
                           String alias,
+                          String service,
+                          String expectedDomains,
+                          int aliasSpamHits,
+                          int aliasHamHits,
+                          int aliasState,
                           String folderType,
                           String senderDomain,
+                          boolean hasUnsubscribe,
                           int label,
                           Long confirmedFamilyId,
                           Long predictedFamilyId,
+                          Double aliasSpamSupport,
+                          Double aliasHamSupport,
+                          String aliasVerdict,
+                          String aliasReasons,
                           Double score,
                           Double raw,
                           Double text,
@@ -257,11 +319,21 @@ public final class SpamFamilyLabRepository {
             this.preview = preview;
             this.messagePresent = messagePresent;
             this.alias = alias;
+            this.service = service;
+            this.expectedDomains = expectedDomains;
+            this.aliasSpamHits = aliasSpamHits;
+            this.aliasHamHits = aliasHamHits;
+            this.aliasState = aliasState;
             this.folderType = folderType;
             this.senderDomain = senderDomain;
+            this.hasUnsubscribe = hasUnsubscribe;
             this.label = label;
             this.confirmedFamilyId = confirmedFamilyId;
             this.predictedFamilyId = predictedFamilyId;
+            this.aliasSpamSupport = aliasSpamSupport;
+            this.aliasHamSupport = aliasHamSupport;
+            this.aliasVerdict = aliasVerdict;
+            this.aliasReasons = aliasReasons;
             this.score = score;
             this.raw = raw;
             this.text = text;
@@ -276,6 +348,7 @@ public final class SpamFamilyLabRepository {
 
         private static Candidate from(EntityAliasDelivery delivery,
                                       EntityMessage message,
+                                      EntityAlias alias,
                                       long familyId) {
             String sender = null;
             String subject = null;
@@ -294,6 +367,12 @@ public final class SpamFamilyLabRepository {
             double value = selectedScore == null ? -1.0 : selectedScore;
             boolean confirmed = delivery.label == EntityAliasDelivery.LABEL_SPAM &&
                     delivery.family_id != null && delivery.family_id == familyId;
+
+            int aliasSpam = alias == null || alias.spam_hits == null ? 0 : alias.spam_hits;
+            int aliasHam = alias == null || alias.ham_hits == null ? 0 : alias.ham_hits;
+            int aliasState = alias == null || alias.state == null
+                    ? EntityAlias.STATE_ACTIVE : alias.state;
+
             return new Candidate(
                     delivery.message_id,
                     delivery.received,
@@ -302,11 +381,21 @@ public final class SpamFamilyLabRepository {
                     preview,
                     message != null,
                     delivery.address,
+                    alias == null ? null : alias.service,
+                    expectedDomains(alias),
+                    aliasSpam,
+                    aliasHam,
+                    aliasState,
                     delivery.folder_type,
                     delivery.sender_domain,
+                    delivery.has_unsubscribe,
                     delivery.label,
                     delivery.family_id,
                     delivery.predicted_family_id,
+                    delivery.spam_support,
+                    delivery.ham_support,
+                    delivery.traffic_verdict,
+                    delivery.traffic_reasons,
                     selectedScore,
                     predictedThisFamily ? delivery.family_score_raw : null,
                     predictedThisFamily ? delivery.family_text : null,
