@@ -55,6 +55,18 @@ The repository audit proved:
 - the main dashboard now contains the legitimate migrated capabilities: family list, rename, exact rescan, read-only family messages, global Spam/HAM review, undo/reset, details, and separate Spam Network diagnostics;
 - `SpamFamilyStore.matchIdentity()` still consults legacy exclusion rows, so old fuzzy-lab state can currently suppress exact production identity and must be neutralized.
 
+### Reply-alias closeout archaeology
+
+The first final-head reply contract introduced in `41feaac0de7393aa6e54785d575f4dd6e57f4722` encoded an obsolete implementation shape: it required `resolveReplyExtra(context, selected, ref.deliveredto)`.
+
+History proves that `2944d2f22b466c667f0a1111037ade4dc5abc856` had already intentionally changed the runtime to resolve from the reconstructed authoritative local value `replyDeliveredTo`, after writing that same value to `ref.deliveredto` and re-observing the historical message. `eb637ec8f6afa4b7a13b4d77b068d51f1a745b09` then strengthened the authority order so original envelope/recipient evidence outranks later routing `Delivered-To`.
+
+Therefore the red final-head reply gate on `41feaac0` was a stale contract, not a runtime regression. The contract correction must preserve the actual v5 chain:
+
+`original envelope/recipient evidence → replyDeliveredTo → ref.deliveredto persistence → re-observation → resolveReplyExtra(replyDeliveredTo) → draft.extra`
+
+No Java/runtime change belongs to this correction.
+
 ---
 
 ## 4. Allowed runtime changes
@@ -89,7 +101,7 @@ This ChangeSet must not change:
 - alias compromise policy inputs;
 - alias lifecycle / SMTP burn semantics;
 - cPanel request/read-back/rollback behavior;
-- reply-from-alias `Envelope-To` authority;
+- reply-from-alias authority semantics;
 - reset/undo snapshot semantics;
 - Room DB version or migrations;
 - `spam_family_exclusion` schema representation in this ChangeSet;
@@ -122,6 +134,8 @@ docs/spam-control/SEMANTIC_SYSTEM_MODEL.md
 docs/spam-control/CURRENT_CHANGESET.md
 .github/scripts/verify_spam_exact_family_retirement.py
 .github/workflows/verify-spam-exact-family-retirement.yml
+.github/scripts/verify_reply_alias_authority.py
+.github/workflows/verify-reply-alias-authority.yml
 .github/workflows/audit-spam-control-entrypoints.yml
 .github/workflows/spam-intelligence-android.yml   (gate trigger / path cleanup only)
 ```
@@ -147,14 +161,15 @@ Temporary archaeology/apply workflows may be removed after their evidence is cap
 3. canonical-message + alias-sideeffect contract;
 4. reset/undo contract;
 5. scan/Terminal/cPanel observability contract;
-6. CI contract-coverage contract;
-7. Spam Control entrypoint audit;
-8. exact-family/core invariants;
-9. Android Java + Room compile;
-10. Room migration verification;
-11. githubDebug APK assembly;
-12. pinned signer verification;
-13. checksummed artifact creation.
+6. reply-from-alias authority contract;
+7. CI contract-coverage contract;
+8. Spam Control entrypoint audit;
+9. exact-family/core invariants;
+10. Android Java + Room compile;
+11. Room migration verification;
+12. githubDebug APK assembly;
+13. pinned signer verification;
+14. checksummed artifact creation.
 
 ### Source invariants
 
@@ -170,7 +185,7 @@ Temporary archaeology/apply workflows may be removed after their evidence is cap
 
 ### Cross-feature invariant
 
-Reply-from-alias must remain unchanged and continue to use incoming `Envelope-To` as authoritative desired alias.
+Reply-from-alias must remain unchanged semantically. Original envelope evidence is authoritative ahead of later routing `Delivered-To`; the resolved alias is persisted to `ref.deliveredto`, re-observed, and the same authoritative value is consumed by reply-extra resolution.
 
 ---
 
@@ -195,8 +210,8 @@ This ChangeSet closes only when all are true:
 - exact identity cannot be suppressed by legacy exclusion state;
 - exclusion storage remains readable for rollback/snapshot compatibility;
 - no unrelated app source changed;
-- all semantic contracts are green;
-- Android compile/migrations/APK/signing/checksum gates are green;
+- all semantic contracts, including reply-from-alias authority, are green on the same final candidate SHA;
+- Android compile/migrations/APK/signing/checksum gates are green on that same SHA;
 - base→candidate diff matches the explicit scope;
 - `feature/spam-control-p0` has not moved unexpectedly;
 - the candidate can be fast-forwarded without rewriting history.
