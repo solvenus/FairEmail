@@ -21,10 +21,6 @@ public final class SpamIntelligence {
     private SpamIntelligence() {
     }
 
-    /**
-     * Convenience ingress for existing FairEmail paths that only have a
-     * message/folder pair. Account UUID is resolved from FairEmail's main DB.
-     */
     public static void observeMessage(Context context,
                                       EntityFolder folder,
                                       EntityMessage message) {
@@ -45,7 +41,7 @@ public final class SpamIntelligence {
         }
     }
 
-    /** Record envelope alias and sender-domain evidence once the message has a DB id. */
+    /** Record envelope alias and all observer-only intelligence once the message has a DB id. */
     public static void observeMessage(Context context,
                                       EntityAccount account,
                                       EntityFolder folder,
@@ -68,12 +64,10 @@ public final class SpamIntelligence {
                     evidence.senderDomain,
                     evidence.unsubscribe);
 
-            // Evaluate and persist only. Automatic move/delete remains disabled
-            // until replay has established precision on real user data.
+            // Observer-only evidence. No automatic move/delete is allowed here.
             refreshAssessment(context, account, message, true);
+            refreshFamilyMatch(context, account, message, true);
 
-            // Reuse FairEmail's existing sender_extra mechanism, but constrain it
-            // to exact reply-capable aliases already observed in our registry.
             AliasSenderManager.synchronizeForMessage(context, account, message);
         } catch (Throwable ex) {
             // Intelligence must never be able to break mail synchronization.
@@ -222,8 +216,6 @@ public final class SpamIntelligence {
                     label,
                     familyId);
             if (!changed) {
-                // Do not leave a newly inserted exemplar orphaned if the ledger
-                // could not accept the corresponding spam label.
                 if (familyLearn != null && familyLearn.learned &&
                         before.label != EntityAliasDelivery.LABEL_SPAM)
                     SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
@@ -234,8 +226,6 @@ public final class SpamIntelligence {
                     before.label == EntityAliasDelivery.LABEL_SPAM)
                 SpamFamilyStore.unlearnMessage(context, account.uuid, message.id);
 
-            // A confirmed spam delivery means the address has escaped its intended
-            // context. This does NOT retire it yet; COMPROMISED stays reply-capable.
             EntityAliasDelivery after = dao.getDelivery(account.uuid, message.id);
             if (after != null) {
                 if (label == EntityAliasDelivery.LABEL_SPAM)
@@ -249,6 +239,7 @@ public final class SpamIntelligence {
             }
 
             refreshAssessment(context, account, message, false);
+            refreshFamilyMatch(context, account, message, false);
         } catch (Throwable ex) {
             Log.e(ex);
         }
@@ -271,6 +262,39 @@ public final class SpamIntelligence {
                     " aliasLabels=" + traffic.aliasSpam + "/" + traffic.aliasHam +
                     " senderLabels=" + traffic.senderSpam + "/" + traffic.senderHam +
                     " " + traffic.assessment);
+    }
+
+    private static void refreshFamilyMatch(Context context,
+                                           EntityAccount account,
+                                           EntityMessage message,
+                                           boolean log) {
+        if (context == null || account == null || account.uuid == null ||
+                message == null || message.id == null)
+            return;
+
+        DaoSpamFamily dao = SpamIntelligenceDB.getInstance(context).family();
+        long assessedAt = System.currentTimeMillis();
+        SpamFamilyFingerprint fingerprint = SpamFamilyMessageAdapter.fromMessage(context, message);
+        if (fingerprint == null) {
+            dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
+            return;
+        }
+
+        SpamFamilyStore.Match match = SpamFamilyStore.match(context, account.uuid, fingerprint);
+        if (match.familyId == null) {
+            dao.clearFamilyMatch(account.uuid, message.id, assessedAt);
+            return;
+        }
+
+        SpamFamilyEngine.Score score = match.score;
+        dao.setFamilyMatch(account.uuid, message.id, match.familyId,
+                score.value, score.raw, score.text, score.structure,
+                score.links, score.sender, assessedAt);
+        if (log)
+            Log.i("SpamFamily match family=" + match.familyId +
+                    " spamLike=" + match.spamLike +
+                    " message=" + message.id +
+                    " " + score);
     }
 
     private static String emailDomain(String address) {
