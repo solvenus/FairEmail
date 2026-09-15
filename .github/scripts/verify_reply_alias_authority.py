@@ -3,9 +3,10 @@
 
 This contract is intentionally read-only. Spam Control shares alias inventory with
 reply composition, so Spam refactors must preserve the independent reply path:
-original envelope/recipient evidence -> ref.deliveredto -> re-observation ->
-resolveReplyExtra -> draft.extra.
+original envelope/recipient evidence -> authoritative replyDeliveredTo ->
+ref.deliveredto persistence/re-observation -> resolveReplyExtra -> draft.extra.
 """
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,17 +31,29 @@ require('"Envelope-To", "X-Envelope-To", "X-Original-To"' in compose,
         "original envelope headers are no longer the leading reply alias evidence")
 require('replyAliasSource = "Delivered-To"' in compose,
         "Delivered-To fallback is missing")
-require("ref.deliveredto = replyDeliveredTo;" in compose,
-        "resolved reply alias is not written back to ref.deliveredto")
-require("SpamIntelligence.observeMessage(context, refAccount, refFolder, ref);" in compose,
-        "resolved historical alias is not re-observed before compose continues")
 
-# Compose must resolve sender-extra from the selected reply identity and authoritative
-# delivered-to alias, then write the resolved extra into the draft.
-require("SpamIntelligence.resolveReplyExtra(context, selected, ref.deliveredto)" in compose,
-        "compose no longer resolves reply extra from ref.deliveredto")
-require("data.draft.extra = envelopeExtra;" in compose,
-        "resolved reply alias extra is not written into the draft")
+# The resolved authority is first mirrored/persisted to ref.deliveredto and
+# re-observed, then the same resolved value is consumed by reply-extra resolution.
+# Do not pin this contract back to the pre-v4 implementation shape where the
+# resolver consumed ref.deliveredto directly.
+writeback = compose.find("ref.deliveredto = replyDeliveredTo;")
+observe = compose.find("SpamIntelligence.observeMessage(context, refAccount, refFolder, ref);")
+resolve = re.search(
+    r"SpamIntelligence\.resolveReplyExtra\(\s*context\s*,\s*selected\s*,\s*replyDeliveredTo\s*\)",
+    compose,
+)
+draft_write = compose.find("data.draft.extra = envelopeExtra;")
+
+require(writeback >= 0,
+        "resolved reply alias is not written back to ref.deliveredto")
+require(observe > writeback,
+        "resolved historical alias is not re-observed after ref.deliveredto repair")
+require(resolve is not None,
+        "compose no longer resolves reply extra from authoritative replyDeliveredTo")
+require(resolve.start() > observe,
+        "reply extra is resolved before authoritative alias re-observation")
+require(draft_write > resolve.start(),
+        "resolved reply alias extra is not written into the draft after resolution")
 
 # SpamIntelligence validates capability, but does not redefine the desired alias.
 require("String alias = AliasRegistry.normalizeAddress(deliveredTo);" in intelligence,
@@ -51,4 +64,4 @@ require("String local = alias.substring(0, aat);" in intelligence,
         "resolveReplyExtra no longer derives sender-extra from the delivered alias local-part")
 
 print("PASS: reply-from-alias authority chain is intact")
-print("PASS: original envelope evidence -> ref.deliveredto -> observe -> resolveReplyExtra -> draft.extra")
+print("PASS: original envelope evidence -> replyDeliveredTo -> ref.deliveredto/observe -> resolveReplyExtra -> draft.extra")
