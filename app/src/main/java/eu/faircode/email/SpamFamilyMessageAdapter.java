@@ -21,13 +21,23 @@ import java.nio.charset.StandardCharsets;
 import javax.mail.Address;
 import javax.mail.internet.InternetAddress;
 
-/** Converts a locally stored FairEmail message into a bounded hashed fingerprint. */
+/** Converts a locally stored FairEmail message into spam intelligence features. */
 public final class SpamFamilyMessageAdapter {
     // Enough to preserve long newsletter/template structure while bounding work
     // on hostile or pathological HTML bodies.
     private static final int MAX_HTML_CHARS = 1_500_000;
 
     private SpamFamilyMessageAdapter() {
+    }
+
+    public static SpamFamilyIdentity.Identity identityFromMessage(EntityMessage message) {
+        if (message == null)
+            return null;
+        String senderName = null;
+        Address[] from = message.from;
+        if (from != null && from.length > 0 && from[0] instanceof InternetAddress)
+            senderName = ((InternetAddress) from[0]).getPersonal();
+        return SpamFamilyIdentity.fromRaw(senderName, message.subject);
     }
 
     public static SpamFamilyFingerprint fromMessage(Context context, EntityMessage message) {
