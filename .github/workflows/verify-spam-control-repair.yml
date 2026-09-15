@@ -1,0 +1,49 @@
+name: Verify Spam Control repair branch
+
+on:
+  push:
+    branches:
+      - repair/spam-control-preserve-compromise-contract
+    paths:
+      - 'app/src/main/java/eu/faircode/email/SpamIntelligence.java'
+      - '.github/workflows/verify-spam-control-repair.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  SPAM_FAMILIES_DEBUG_CERT_SHA256: 'CC:76:B0:A6:00:8D:13:29:B4:2E:02:80:69:80:EB:35:53:29:25:25:89:DC:A5:F8:44:81:63:4E:36:1C:48:C0'
+  SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256: 'a5b8dec7dfb22b8724291eea1f54771102873c454eb9d2f56049a86918bb2802'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: gradle
+      - name: Install pinned debug signing key
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/keys/spam-families-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          printf '%s  %s\n' "$SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256" "$HOME/.android/debug.keystore" | sha256sum -c -
+      - name: Verify preserved compromise adapter contract
+        run: |
+          set -euo pipefail
+          FILE=app/src/main/java/eu/faircode/email/SpamIntelligence.java
+          grep -q 'input.trafficSuspicious' "$FILE"
+          grep -q 'traffic.senderDomain' "$FILE"
+          grep -q 'traffic.serviceDomain' "$FILE"
+          grep -q 'traffic.trustedDomains' "$FILE"
+          grep -q 'input.aliasHam = traffic.aliasHam' "$FILE"
+          ! grep -q 'AliasDomainAffinity.isTrustedSender' "$FILE"
+      - name: Compile Java and Room
+        run: ./gradlew :app:compileGithubDebugJavaWithJavac --stacktrace --no-daemon
+      - name: Verify DB migrations 8 to 11
+        run: python3 .github/scripts/verify_spam_intelligence_migration.py
