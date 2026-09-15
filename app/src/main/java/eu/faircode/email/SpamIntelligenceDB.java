@@ -25,7 +25,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase;
  * and experimental schema evolution substantially safer.
  */
 @Database(
-        version = 6,
+        version = 7,
         entities = {
                 EntityAlias.class,
                 EntityAliasDelivery.class,
@@ -128,6 +128,22 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
         }
     };
 
+    private static final Migration MIGRATION_6_7 = new Migration(6, 7) {
+        @Override
+        public void migrate(@NonNull SupportSQLiteDatabase db) {
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN predicted_family_id INTEGER");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_score REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_score_raw REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_text REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_structure REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_links REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_sender REAL");
+            db.execSQL("ALTER TABLE alias_delivery ADD COLUMN family_assessed_at INTEGER");
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_alias_delivery_predicted_family_id" +
+                    " ON alias_delivery(predicted_family_id)");
+        }
+    };
+
     public abstract DaoAlias alias();
     public abstract DaoSpamFamily family();
 
@@ -144,7 +160,7 @@ public abstract class SpamIntelligenceDB extends RoomDatabase {
                                 SpamIntelligenceDB.class,
                                 DB_NAME)
                         .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4,
-                                MIGRATION_4_5, MIGRATION_5_6)
+                                MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                         .build();
                 instance = current;
             }
