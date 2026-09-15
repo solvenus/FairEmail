@@ -1,5 +1,6 @@
 name: Apply canonical Spam message snapshot via API
 
+# trigger: canonical snapshot
 on:
   push:
     branches: [feature/spam-control-p0]
