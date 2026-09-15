@@ -1,0 +1,38 @@
+name: Apply reply alias Envelope-To fix v2
+
+on:
+  push:
+    branches:
+      - feature/spam-families
+    paths:
+      - .github/scripts/apply_reply_alias_envelope_fix_v2.py
+      - .github/workflows/apply-reply-alias-envelope-fix-v2.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/spam-families
+          fetch-depth: 0
+
+      - name: Apply exact reply alias patch
+        run: python3 .github/scripts/apply_reply_alias_envelope_fix_v2.py
+
+      - name: Commit patch
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No changes needed"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/FragmentCompose.java
+          git commit -m "Fix reply alias from Envelope-To v2"
+          git push origin HEAD:feature/spam-families
