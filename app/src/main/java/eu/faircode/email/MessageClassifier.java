@@ -61,6 +61,8 @@ public class MessageClassifier {
 
     static synchronized void classify(EntityMessage message, EntityFolder folder, boolean added, Context context) {
         try {
+            SpamIntelligence.observeMessage(context, folder, message);
+
             if (!isEnabled(context))
                 return;
 
