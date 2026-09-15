@@ -8,6 +8,11 @@
 */
 package eu.faircode.email;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
 import java.net.URI;
 import java.text.Normalizer;
 import java.util.ArrayList;
@@ -28,6 +33,9 @@ public final class SpamFamilyFingerprint {
     private static final Pattern TAG = Pattern.compile("(?is)<\\s*(/?)\\s*([a-z0-9]+)(?:\\s[^>]*)?>");
     private static final Pattern HREF = Pattern.compile("(?is)href\\s*=\\s*([\\\"'])(.*?)\\1");
     private static final Pattern TOKEN = Pattern.compile("[\\p{L}<>]+(?:['’][\\p{L}]+)?");
+
+    private static final int SERIAL_MAGIC = 0x53464631; // SFF1
+    private static final int MAX_SERIALIZED_FEATURES = 100_000;
 
     final Set<Long> text;
     final Set<Long> structure;
@@ -63,6 +71,61 @@ public final class SpamFamilyFingerprint {
         Set<Long> sender = new HashSet<>();
         addSender(sender, senderAddress, senderName);
         return new SpamFamilyFingerprint(text, structure, links, sender);
+    }
+
+    /** Compact deterministic representation containing hashes only, never raw mail text. */
+    public byte[] toBytes() {
+        try {
+            ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+            DataOutputStream out = new DataOutputStream(bytes);
+            out.writeInt(SERIAL_MAGIC);
+            writeSet(out, text);
+            writeSet(out, structure);
+            writeSet(out, links);
+            writeSet(out, sender);
+            out.flush();
+            return bytes.toByteArray();
+        } catch (IOException ex) {
+            // ByteArrayOutputStream should not throw, but keep the contract explicit.
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    public static SpamFamilyFingerprint fromBytes(byte[] bytes) {
+        if (bytes == null || bytes.length < 4)
+            throw new IllegalArgumentException("fingerprint bytes");
+        try {
+            DataInputStream in = new DataInputStream(new ByteArrayInputStream(bytes));
+            if (in.readInt() != SERIAL_MAGIC)
+                throw new IllegalArgumentException("unsupported fingerprint format");
+            Set<Long> text = readSet(in);
+            Set<Long> structure = readSet(in);
+            Set<Long> links = readSet(in);
+            Set<Long> sender = readSet(in);
+            if (in.available() != 0)
+                throw new IllegalArgumentException("trailing fingerprint data");
+            return new SpamFamilyFingerprint(text, structure, links, sender);
+        } catch (IOException ex) {
+            throw new IllegalArgumentException("invalid fingerprint", ex);
+        }
+    }
+
+    private static void writeSet(DataOutputStream out, Set<Long> values) throws IOException {
+        List<Long> sorted = new ArrayList<>(values);
+        Collections.sort(sorted);
+        out.writeInt(sorted.size());
+        for (Long value : sorted)
+            out.writeLong(value);
+    }
+
+    private static Set<Long> readSet(DataInputStream in) throws IOException {
+        int count = in.readInt();
+        if (count < 0 || count > MAX_SERIALIZED_FEATURES)
+            throw new IllegalArgumentException("feature count=" + count);
+        Set<Long> values = new HashSet<>(Math.max(16, count * 2));
+        for (int i = 0; i < count; i++)
+            values.add(in.readLong());
+        return values;
     }
 
     public int evidenceCount() {
