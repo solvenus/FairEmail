@@ -37,12 +37,17 @@ on:
       - 'app/src/main/java/eu/faircode/email/SpamIntentObserver.java'
       - 'app/src/main/java/eu/faircode/email/TupleAliasDomainStats.java'
       - 'app/src/main/java/eu/faircode/email/TupleSpamFamily*.java'
+      - '.github/keys/spam-families-debug.keystore.b64'
       - '.github/scripts/verify_spam_intelligence_migration.py'
       - '.github/workflows/spam-intelligence-android.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
+
+env:
+  SPAM_FAMILIES_DEBUG_CERT_SHA256: 'CC:76:B0:A6:00:8D:13:29:B4:2E:02:80:69:80:EB:35:53:29:25:25:89:DC:A5:F8:44:81:63:4E:36:1C:48:C0'
+  SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256: 'a5b8dec7dfb22b8724291eea1f54771102873c454eb9d2f56049a86918bb2802'
 
 jobs:
   compile:
@@ -55,6 +60,23 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
           cache: gradle
+      - name: Install stable Spam Families debug signing key
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.android"
+          base64 --decode .github/keys/spam-families-debug.keystore.b64 > "$HOME/.android/debug.keystore"
+          chmod 600 "$HOME/.android/debug.keystore"
+          printf '%s  %s\n' "$SPAM_FAMILIES_DEBUG_KEYSTORE_SHA256" "$HOME/.android/debug.keystore" | sha256sum -c -
+
+          actual="$(keytool -list -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android \
+            -alias androiddebugkey \
+            | sed -n 's/^[[:space:]]*SHA256: //p' \
+            | head -n 1 \
+            | tr -d '\r')"
+          test "$actual" = "$SPAM_FAMILIES_DEBUG_CERT_SHA256"
+          echo "Pinned debug signing certificate: $actual"
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
       - name: Compile GitHub debug Java and Room code
@@ -71,11 +93,32 @@ jobs:
           set -euo pipefail
           ./gradlew --no-daemon --max-workers=2 --no-build-cache --no-configuration-cache \
             :app:assembleGithubDebug
+      - name: Verify APK signing identity
+        run: |
+          set -euo pipefail
+          apk="$(find app/build/outputs/apk/github/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$apk"
+          apksigner="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$apksigner"
+
+          "$apksigner" verify "$apk"
+          actual="$($apksigner verify --print-certs "$apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+            | head -n 1 \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
+          expected="$(printf '%s' "$SPAM_FAMILIES_DEBUG_CERT_SHA256" \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
+          test "$actual" = "$expected"
+          echo "Verified APK signing certificate: $SPAM_FAMILIES_DEBUG_CERT_SHA256"
       - name: Prepare checksummed APK artifact
         run: |
           set -euo pipefail
           mkdir -p build/spam-family-apk
           cp app/build/outputs/apk/github/debug/*.apk build/spam-family-apk/
+          printf '%s\n' "$SPAM_FAMILIES_DEBUG_CERT_SHA256" > build/spam-family-apk/SIGNING_CERT_SHA256.txt
+          printf '%s\n' "$GITHUB_SHA" > build/spam-family-apk/BUILD_COMMIT.txt
           (cd build/spam-family-apk && sha256sum *.apk > SHA256SUMS.txt)
           test -s build/spam-family-apk/SHA256SUMS.txt
       - name: Upload Spam Families debug APK
