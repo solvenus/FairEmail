@@ -27,7 +27,8 @@ import androidx.room.Index;
                 @Index(value = {"account_uuid", "address"}),
                 @Index(value = {"received"}),
                 @Index(value = {"label"}),
-                @Index(value = {"family_id"})
+                @Index(value = {"family_id"}),
+                @Index(value = {"sender_domain"})
         }
 )
 public class EntityAliasDelivery {
@@ -49,6 +50,12 @@ public class EntityAliasDelivery {
 
     /** FairEmail folder type at the most recent observation, if known. */
     public String folder_type;
+
+    /** Registrable root domain of the message sender, when available. */
+    public String sender_domain;
+
+    /** Presence of a parsed List-Unsubscribe address/header. Evidence, not an allow rule. */
+    public boolean has_unsubscribe = false;
 
     /** User/classifier label; independent of current physical folder. */
     public int label = LABEL_UNKNOWN;
