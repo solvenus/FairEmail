@@ -1,4 +1,5 @@
 name: Apply Spam exact-family retirement
+# Retriggered after CURRENT_CHANGESET was corrected to the functional retirement scope.
 
 on:
   push:
