@@ -215,7 +215,7 @@ public final class SpamIntelligence {
                 familyDao.clearFamilyMatch(account.uuid, message.id,
                         System.currentTimeMillis());
 
-            refreshFamilyMatch(context, account, message, false);
+            refreshMessageFamilyState(context, account, message, false);
             return true;
         } catch (Throwable ex) {
             Log.e(ex);
@@ -427,39 +427,30 @@ public final class SpamIntelligence {
         }
     }
 
-    private static AliasCompromisePolicy.Decision aliasCompromiseDecision(
-            Context context, EntityAccount account, EntityMessage message) {
-        AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(
-                context, account, message);
-        AliasCompromisePolicy.Input input = new AliasCompromisePolicy.Input();
-        input.explicitSpam = true;
-        input.trafficSuspicious = traffic.assessment.verdict ==
-                AliasTrafficScorer.Verdict.SUSPICIOUS;
-        input.senderKnown = traffic.senderDomain != null;
-        input.expectedContextKnown = traffic.serviceDomain != null ||
-                (traffic.trustedDomains != null && !traffic.trustedDomains.isEmpty());
-        input.expectedSenderMatch = traffic.senderDomain != null &&
-                ((traffic.serviceDomain != null &&
-                        traffic.senderDomain.equalsIgnoreCase(traffic.serviceDomain)) ||
-                        containsIgnoreCase(traffic.trustedDomains, traffic.senderDomain));
-        input.aliasHam = traffic.aliasHam;
-        return AliasCompromisePolicy.decide(input);
-    }
-
-    private static boolean containsIgnoreCase(java.util.List<String> values, String needle) {
-        if (values == null || needle == null)
-            return false;
-        for (String value : values)
-            if (needle.equalsIgnoreCase(value))
-                return true;
-        return false;
+    private static AliasCompromisePolicy.Decision aliasCompromiseDecision(Context context,
+                                                                           EntityAccount account,
+                                                                           EntityMessage message) {
+        try {
+            AliasTrafficAnalyzer.Result traffic = AliasTrafficAnalyzer.assess(context, account, message);
+            EntityAlias alias = traffic.alias == null ? null :
+                    SpamIntelligenceDB.getInstance(context).alias()
+                            .getAlias(account.uuid, traffic.alias);
+            return AliasCompromisePolicy.decide(
+                    context,
+                    traffic.assessment == null ? null : traffic.assessment.verdict,
+                    alias != null && traffic.senderDomain != null &&
+                            AliasDomainAffinity.isTrustedSender(alias, traffic.senderDomain));
+        } catch (Throwable ex) {
+            Log.e(ex);
+            return AliasCompromisePolicy.Decision.REVIEW;
+        }
     }
 
     private static String emailDomain(String address) {
         if (address == null)
             return null;
         int at = address.lastIndexOf('@');
-        if (at <= 0 || at + 1 >= address.length())
+        if (at < 0 || at + 1 >= address.length())
             return null;
         return address.substring(at + 1).toLowerCase(Locale.ROOT);
     }
