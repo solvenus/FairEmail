@@ -29,6 +29,46 @@ public interface DaoSpamFamily {
             " ORDER BY updated_at DESC, id")
     LiveData<List<EntitySpamFamily>> liveFamilies(String accountUuid);
 
+    @Query("SELECT f.id AS family_id," +
+            " f.name AS name," +
+            " f.active AS active," +
+            " f.confirmed_count AS confirmed_count," +
+            " f.created_at AS created_at," +
+            " f.updated_at AS updated_at," +
+            " (SELECT COUNT(*) FROM spam_family_exemplar e" +
+            "   WHERE e.family_id = f.id) AS exemplar_count," +
+            " (SELECT COUNT(*) FROM alias_delivery d" +
+            "   WHERE d.account_uuid = f.account_uuid" +
+            "   AND d.predicted_family_id = f.id) AS predicted_count," +
+            " (SELECT COUNT(*) FROM alias_delivery d" +
+            "   WHERE d.account_uuid = f.account_uuid" +
+            "   AND d.predicted_family_id = f.id" +
+            "   AND d.family_score >= :strongThreshold) AS strong_count," +
+            " (SELECT COUNT(*) FROM alias_delivery d" +
+            "   WHERE d.account_uuid = f.account_uuid" +
+            "   AND d.predicted_family_id = f.id" +
+            "   AND d.family_score >= :strongThreshold" +
+            "   AND d.label = " + EntityAliasDelivery.LABEL_UNKNOWN + ") AS strong_unknown_count," +
+            " (SELECT COUNT(*) FROM alias_delivery d" +
+            "   WHERE d.account_uuid = f.account_uuid" +
+            "   AND d.predicted_family_id = f.id" +
+            "   AND d.family_score >= :strongThreshold" +
+            "   AND d.label = " + EntityAliasDelivery.LABEL_HAM + ") AS strong_ham_count," +
+            " (SELECT MAX(d.family_score) FROM alias_delivery d" +
+            "   WHERE d.account_uuid = f.account_uuid" +
+            "   AND d.predicted_family_id = f.id) AS max_score," +
+            " (SELECT t.processed FROM spam_rescore_task t" +
+            "   WHERE t.account_uuid = f.account_uuid AND t.family_id = f.id) AS rescore_processed," +
+            " (SELECT t.matches FROM spam_rescore_task t" +
+            "   WHERE t.account_uuid = f.account_uuid AND t.family_id = f.id) AS rescore_matches," +
+            " (SELECT t.before_message_id FROM spam_rescore_task t" +
+            "   WHERE t.account_uuid = f.account_uuid AND t.family_id = f.id) AS rescore_cursor" +
+            " FROM spam_family f" +
+            " WHERE f.account_uuid = :accountUuid" +
+            " ORDER BY f.updated_at DESC, f.id")
+    LiveData<List<TupleSpamFamilyOverview>> liveFamilyOverview(
+            String accountUuid, double strongThreshold);
+
     @Query("SELECT * FROM spam_family WHERE id = :id LIMIT 1")
     EntitySpamFamily getFamily(long id);
 
@@ -124,6 +164,14 @@ public interface DaoSpamFamily {
             " AND predicted_family_id IS NOT NULL" +
             " ORDER BY family_score DESC, received DESC")
     LiveData<List<EntityAliasDelivery>> liveFamilyMatches(String accountUuid);
+
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid" +
+            " AND predicted_family_id = :familyId" +
+            " ORDER BY family_score DESC, received DESC" +
+            " LIMIT :limit")
+    List<EntityAliasDelivery> getFamilyCandidates(
+            String accountUuid, long familyId, int limit);
 
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid" +
