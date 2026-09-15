@@ -1,0 +1,47 @@
+name: Fix cPanel pure-fail semantics
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/fix_cpanel_pure_fail_semantics.py'
+      - '.github/workflows/fix-cpanel-pure-fail-semantics.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply pure-fail semantics regression fix
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/fix_cpanel_pure_fail_semantics.py
+          git diff --check
+      - name: Run focused transaction lab before commit
+        run: |
+          set -euo pipefail
+          mkdir -p build/cpanel-transaction
+          javac -encoding UTF-8 -d build/cpanel-transaction \
+            app/src/main/java/eu/faircode/email/CpanelForwarderRoutePlan.java \
+            app/src/main/java/eu/faircode/email/CpanelForwarderTransaction.java \
+            tools/spam-family-lab/CpanelForwarderTransactionLab.java
+          java -cp build/cpanel-transaction eu.faircode.email.CpanelForwarderTransactionLab
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/CpanelForwarderTransaction.java \
+                  tools/spam-family-lab/CpanelForwarderTransactionLab.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Require pure fail for verified SMTP dead"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
