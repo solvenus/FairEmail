@@ -11,49 +11,15 @@ package eu.faircode.email;
 
 import android.content.Context;
 
-import java.util.concurrent.Callable;
-
-/** Safely resets learned spam state without touching mail, user alias config or SMTP state. */
+/**
+ * Human-facing blank-slate reset. The reset is itself checkpointed by
+ * SpamUndoManager and can be reversed with "Angre siste valg".
+ */
 public final class SpamResetManager {
     private SpamResetManager() {
     }
 
-    public static boolean resetLearning(Context context, String accountUuid) {
-        if (context == null || accountUuid == null || accountUuid.trim().isEmpty())
-            return false;
-
-        final Context app = context.getApplicationContext();
-        final String account = accountUuid.trim();
-        final SpamIntelligenceDB db = SpamIntelligenceDB.getInstance(app);
-        try {
-            return db.runInTransaction(new Callable<Boolean>() {
-                @Override
-                public Boolean call() {
-                    DaoSpamFamily family = db.family();
-                    DaoAlias alias = db.alias();
-
-                    // Derived model state first, then retained delivery labels/scores.
-                    family.deleteRescoreTasksForAccount(account);
-                    family.deleteExclusionsForAccount(account);
-                    family.deleteExemplarsForAccount(account);
-                    family.deleteFamiliesForAccount(account);
-
-                    alias.resetDeliveryLearning(account);
-                    alias.resetAliasLearning(account);
-
-                    // Pending operation intents predate the reset and must not
-                    // resurrect old human labels after the reset completes.
-                    alias.deleteAllSpamIntents();
-
-                    // Reset intentionally clears the undo stack too: the user
-                    // requested a genuinely blank learning history.
-                    db.actions().deleteForAccount(account);
-                    return true;
-                }
-            });
-        } catch (Throwable ex) {
-            Log.e(ex);
-            return false;
-        }
+    public static boolean resetLearning(Context context, String historyAccountUuid) {
+        return SpamUndoManager.resetAllLearning(context, historyAccountUuid);
     }
 }
