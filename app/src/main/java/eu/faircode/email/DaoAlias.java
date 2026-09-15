@@ -150,6 +150,18 @@ public interface DaoAlias {
             " WHERE account_uuid = :accountUuid AND address = :address")
     int clearSmtpReject(String accountUuid, String address);
 
+    /** Clear learned spam/ham state while preserving user metadata and SMTP actuator state. */
+    @Query("UPDATE alias SET" +
+            " spam_hits = 0," +
+            " ham_hits = 0," +
+            " last_spam = NULL," +
+            " last_ham = NULL," +
+            " family_counts = '{}'," +
+            " state = CASE WHEN state = " + EntityAlias.STATE_COMPROMISED +
+            " THEN " + EntityAlias.STATE_ACTIVE + " ELSE state END" +
+            " WHERE account_uuid = :accountUuid")
+    int resetAliasLearning(String accountUuid);
+
     @Query("DELETE FROM alias WHERE account_uuid = :accountUuid")
     int deleteAliases(String accountUuid);
 
@@ -186,6 +198,27 @@ public interface DaoAlias {
     @Query("UPDATE alias_delivery SET label = :label, family_id = :familyId" +
             " WHERE account_uuid = :accountUuid AND message_id = :messageId")
     int setDeliveryLabel(String accountUuid, long messageId, int label, Long familyId);
+
+    /** Reset all derived learning on retained raw delivery observations. */
+    @Query("UPDATE alias_delivery SET" +
+            " label = " + EntityAliasDelivery.LABEL_UNKNOWN + "," +
+            " family_id = NULL," +
+            " predicted_family_id = NULL," +
+            " family_score = NULL," +
+            " family_score_raw = NULL," +
+            " family_text = NULL," +
+            " family_structure = NULL," +
+            " family_links = NULL," +
+            " family_sender = NULL," +
+            " family_assessed_at = NULL," +
+            " spam_support = NULL," +
+            " ham_support = NULL," +
+            " traffic_net = NULL," +
+            " traffic_verdict = NULL," +
+            " traffic_reasons = NULL," +
+            " assessed_at = NULL" +
+            " WHERE account_uuid = :accountUuid")
+    int resetDeliveryLearning(String accountUuid);
 
     @Query("SELECT * FROM alias_delivery" +
             " WHERE account_uuid = :accountUuid AND traffic_verdict = :verdict" +
@@ -238,6 +271,9 @@ public interface DaoAlias {
 
     @Query("DELETE FROM spam_intent WHERE operation_id = :operationId")
     int deleteSpamIntent(long operationId);
+
+    @Query("DELETE FROM spam_intent")
+    int deleteAllSpamIntents();
 
     @Query("SELECT long_value FROM spam_meta WHERE `key` = :key LIMIT 1")
     Long getMetaLong(String key);
