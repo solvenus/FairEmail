@@ -197,6 +197,10 @@ public final class SpamAliasReputation {
         }
     }
 
+    /**
+     * Canonical mailbox identity shared conceptually with AliasRegistry:
+     * preserve the RFC local-part and normalize only the DNS domain.
+     */
     static String normalizeAddress(String deliveredTo) {
         if (deliveredTo == null)
             return null;
@@ -212,7 +216,7 @@ public final class SpamAliasReputation {
         int at = address.lastIndexOf('@');
         if (at <= 0 || at + 1 >= address.length())
             return null;
-        return address.substring(0, at).toLowerCase(Locale.ROOT) + "@" +
+        return address.substring(0, at) + "@" +
                 address.substring(at + 1).toLowerCase(Locale.ROOT);
     }
 
