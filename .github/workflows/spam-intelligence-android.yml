@@ -1,4 +1,4 @@
-# Gate trigger: active inactive spam groups + truthful cPanel diagnostic
+# Gate trigger: review conflict impact + alias lifecycle timeline
 name: Spam Intelligence Android Compile
 
 on:
