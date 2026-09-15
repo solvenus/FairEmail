@@ -740,6 +740,13 @@ public class ActivitySpamFamilyLab extends ActivityBase {
                 .append("Alias legitimitetsstøtte: ").append(percent(candidate.aliasHamSupport)).append('\n')
                 .append("Aliasvurdering: ").append(empty(candidate.aliasVerdict, "ukjent")).append('\n')
                 .append("Aliasårsaker: ").append(empty(candidate.aliasReasons, "ingen")).append("\n\n")
+                .append("SAMLET VURDERING\n")
+                .append("Spamstøtte: ").append(percent(candidate.overallSpamSupport)).append('\n')
+                .append("Legitimitetsstøtte: ").append(percent(candidate.overallHamSupport)).append('\n')
+                .append("Resultat: ").append(candidate.overallVerdict).append('\n')
+                .append("Årsaker: ").append(candidate.overallReasons.isEmpty()
+                        ? "ingen" : android.text.TextUtils.join(", ", candidate.overallReasons))
+                .append("\n\n")
                 .append("Spamgruppelikhet: ").append(percent(candidate.score)).append('\n')
                 .append("Tekst: ").append(percent(candidate.text)).append('\n')
                 .append("Struktur: ").append(percent(candidate.structure)).append('\n')
@@ -763,9 +770,11 @@ public class ActivitySpamFamilyLab extends ActivityBase {
             return "✓ Bekreftet spam i denne gruppen";
         if (candidate.confirmedFamilyId != null)
             return "✓ Bekreftet spam i en annen spamgruppe";
-        if (candidate.strong)
-            return "⚠ Sterkt spamtreff · trenger din kontroll";
-        return "Mulig spamtreff · trenger din kontroll";
+        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.SUSPICIOUS)
+            return "⚠ Høy spamrisiko · trenger din kontroll";
+        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.LIKELY_LEGIT)
+            return "✓ Sterke legitimitetssignaler · kontroller før du endrer";
+        return "Trenger din vurdering";
     }
 
     private String aliasSignal(SpamFamilyLabRepository.Candidate candidate) {
