@@ -38,6 +38,14 @@ public final class SpamControlLog {
         append(context, "INFO", category, message, null);
     }
 
+    public static void d(Context context, String category, String message) {
+        append(context, "DEBUG", category, message, null);
+    }
+
+    public static void t(Context context, String category, String message) {
+        append(context, "TRACE", category, message, null);
+    }
+
     public static void w(Context context, String category, String message) {
         append(context, "WARN", category, message, null);
     }
