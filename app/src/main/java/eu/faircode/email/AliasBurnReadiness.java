@@ -25,6 +25,9 @@ public final class AliasBurnReadiness {
         AliasBurnPolicy.Input input = new AliasBurnPolicy.Input();
         input.spamHits = alias.spam_hits == null ? 0 : alias.spam_hits;
         input.hamHits = alias.ham_hits == null ? 0 : alias.ham_hits;
+        input.aliasCompromised = alias.state != null &&
+                (alias.state == EntityAlias.STATE_COMPROMISED ||
+                        alias.state == EntityAlias.STATE_REPLACED);
         input.serviceDomainKnown = !TextUtils.isEmpty(alias.service_domain);
         input.trustedDomainsConfigured = hasTrustedDomains(alias.trusted_domains);
         input.replacementConfigured = !TextUtils.isEmpty(alias.replaced_by);
