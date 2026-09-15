@@ -1,8 +1,8 @@
 package eu.faircode.email;
 
 /**
- * Tiny zero-dependency replay harness for SpamFamilyEngine.
- * The two spam fixtures are transcribed from real FairEmail screenshots supplied during development.
+ * Tiny zero-dependency replay harness for SpamFamilyEngine and alias evidence.
+ * Spam fixtures are sanitized derivatives of examples supplied during development.
  */
 public final class SpamFamilyLab {
     private static void require(boolean condition, String message) {
@@ -93,6 +93,59 @@ public final class SpamFamilyLab {
                 "repeated spam should lift alias risk above the prior");
     }
 
+    private static void aliasTrafficChecks() {
+        // Ubuy-like legitimate newsletter: alias/domain agree, sender has prior
+        // legitimate history, and unsubscribe is present.
+        AliasTrafficScorer.Input ubuy = new AliasTrafficScorer.Input();
+        ubuy.senderDomainKnown = true;
+        ubuy.serviceDomainKnown = true;
+        ubuy.serviceDomainMatch = true;
+        ubuy.trustedDomainsConfigured = true;
+        ubuy.trustedDomainMatch = true;
+        ubuy.aliasDomainSimilarity = 1.0;
+        ubuy.senderHamConfidence = 0.85;
+        ubuy.unexpectedSender = 0.05;
+        ubuy.hasUnsubscribe = true;
+        AliasTrafficScorer.Assessment legit = AliasTrafficScorer.assess(ubuy);
+        require(legit.verdict == AliasTrafficScorer.Verdict.LIKELY_LEGIT,
+                "matching service newsletter with unsubscribe must be strongly legitimate");
+        require(legit.hamSupport > 0.90 && legit.spamSupport < 0.10,
+                "Ubuy-style hard negative must retain a large legitimacy margin");
+
+        // Leaked service alias hit by an unrelated sender after the expected
+        // domain has been established.
+        AliasTrafficScorer.Input leaked = new AliasTrafficScorer.Input();
+        leaked.senderDomainKnown = true;
+        leaked.serviceDomainKnown = true;
+        leaked.serviceDomainMatch = false;
+        leaked.trustedDomainsConfigured = true;
+        leaked.trustedDomainMatch = false;
+        leaked.aliasDomainSimilarity = 0.0;
+        leaked.senderHamConfidence = 0.0;
+        leaked.unexpectedSender = 0.90;
+        leaked.hasUnsubscribe = false;
+        AliasTrafficScorer.Assessment suspicious = AliasTrafficScorer.assess(leaked);
+        require(suspicious.verdict == AliasTrafficScorer.Verdict.SUSPICIOUS,
+                "established alias plus unrelated domain must be suspicious");
+        require(suspicious.spamSupport > 0.90,
+                "independent mismatch signals should compound strongly");
+
+        // A brand-new alias with no learned/explicit domain relationship must
+        // not be convicted from lack of text overlap alone.
+        AliasTrafficScorer.Input unknown = new AliasTrafficScorer.Input();
+        unknown.senderDomainKnown = true;
+        unknown.aliasDomainSimilarity = 0.0;
+        AliasTrafficScorer.Assessment coldStart = AliasTrafficScorer.assess(unknown);
+        require(coldStart.verdict == AliasTrafficScorer.Verdict.UNKNOWN,
+                "cold-start domain mismatch must not become an automatic spam rule");
+        require(coldStart.spamSupport < 0.20,
+                "cold-start must remain low confidence");
+
+        System.out.println("Alias legit      : " + legit);
+        System.out.println("Alias suspicious : " + suspicious);
+        System.out.println("Alias cold start : " + coldStart);
+    }
+
     public static void main(String[] args) {
         SpamFamilyFingerprint a = akusoli();
         SpamFamilyFingerprint b = wifiBooster();
@@ -129,6 +182,7 @@ public final class SpamFamilyLab {
         require(!ham.spamLike, "legitimate mail must not match this spam family");
 
         aliasReputationChecks();
+        aliasTrafficChecks();
         System.out.println("PASS family=" + first.familyId + " count=" + model.familyCount());
     }
 }
