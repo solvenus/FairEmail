@@ -10,204 +10,160 @@ def replace_once(path: Path, old: str, new: str, label: str) -> None:
     path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
+repository = Path("app/src/main/java/eu/faircode/email/SpamFamilyLabRepository.java")
 activity = Path("app/src/main/java/eu/faircode/email/ActivitySpamFamilyLab.java")
 
 replace_once(
-    activity,
-    '''        TextView groupHelp = bodyText(
-                "En spamgruppe er en samling meldinger som ser ut til å komme fra samme spamkampanje. " +
-                        "Velg en gruppe for å kontrollere treffene.");''',
-    '''        TextView groupHelp = bodyText(
-                "Velg en spamgruppe for å se meldingene som systemet mener hører sammen.");''',
-    "compact group help",
+    repository,
+    '''        public final Double aliasSpamSupport;
+        public final Double aliasHamSupport;
+        public final String aliasVerdict;
+        public final String aliasReasons;
+
+        public final Double score;''',
+    '''        public final Double aliasSpamSupport;
+        public final Double aliasHamSupport;
+        public final String aliasVerdict;
+        public final String aliasReasons;
+
+        public final double overallSpamSupport;
+        public final double overallHamSupport;
+        public final SpamDecisionScorer.Verdict overallVerdict;
+        public final List<String> overallReasons;
+
+        public final Double score;''',
+    "candidate combined decision fields",
+)
+
+replace_once(
+    repository,
+    '''                          Double aliasSpamSupport,
+                          Double aliasHamSupport,
+                          String aliasVerdict,
+                          String aliasReasons,
+                          Double score,''',
+    '''                          Double aliasSpamSupport,
+                          Double aliasHamSupport,
+                          String aliasVerdict,
+                          String aliasReasons,
+                          double overallSpamSupport,
+                          double overallHamSupport,
+                          SpamDecisionScorer.Verdict overallVerdict,
+                          List<String> overallReasons,
+                          Double score,''',
+    "candidate combined decision constructor args",
+)
+
+replace_once(
+    repository,
+    '''            this.aliasSpamSupport = aliasSpamSupport;
+            this.aliasHamSupport = aliasHamSupport;
+            this.aliasVerdict = aliasVerdict;
+            this.aliasReasons = aliasReasons;
+            this.score = score;''',
+    '''            this.aliasSpamSupport = aliasSpamSupport;
+            this.aliasHamSupport = aliasHamSupport;
+            this.aliasVerdict = aliasVerdict;
+            this.aliasReasons = aliasReasons;
+            this.overallSpamSupport = overallSpamSupport;
+            this.overallHamSupport = overallHamSupport;
+            this.overallVerdict = overallVerdict;
+            this.overallReasons = overallReasons;
+            this.score = score;''',
+    "candidate combined decision assignments",
+)
+
+replace_once(
+    repository,
+    '''            int aliasState = alias == null || alias.state == null
+                    ? EntityAlias.STATE_ACTIVE : alias.state;
+
+            return new Candidate(''',
+    '''            int aliasState = alias == null || alias.state == null
+                    ? EntityAlias.STATE_ACTIVE : alias.state;
+
+            SpamDecisionScorer.ExplicitLabel explicitLabel;
+            if (delivery.label == EntityAliasDelivery.LABEL_SPAM)
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.SPAM;
+            else if (delivery.label == EntityAliasDelivery.LABEL_HAM)
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.HAM;
+            else
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.UNKNOWN;
+
+            SpamDecisionScorer.Result overall = SpamDecisionScorer.score(
+                    explicitLabel,
+                    delivery.family_score,
+                    delivery.spam_support == null ? 0.0 : delivery.spam_support,
+                    delivery.ham_support == null ? 0.0 : delivery.ham_support);
+
+            return new Candidate(''',
+    "derive combined spam decision from ledger truth",
+)
+
+replace_once(
+    repository,
+    '''                    delivery.spam_support,
+                    delivery.ham_support,
+                    delivery.traffic_verdict,
+                    delivery.traffic_reasons,
+                    selectedScore,''',
+    '''                    delivery.spam_support,
+                    delivery.ham_support,
+                    delivery.traffic_verdict,
+                    delivery.traffic_reasons,
+                    overall.spamSupport,
+                    overall.hamSupport,
+                    overall.verdict,
+                    overall.reasons,
+                    selectedScore,''',
+    "pass combined spam decision into candidate",
 )
 
 replace_once(
     activity,
-    '''        TextView title = new TextView(this);
-        title.setText("Slik bruker du Spamkontroll");
-        title.setTextSize(18f);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        content.addView(title, matchWrap());
-
-        TextView text = bodyText(
-                "1. Velg en spamgruppe.\\n" +
-                        "2. Se på emne, avsender og alias.\\n" +
-                        "3. Trykk Samme spam, Annen spam eller Ikke spam.\\n\\n" +
-                        "Filteret lærer av valgene dine. Denne skjermen sletter ikke e-post og brenner ikke alias.");''',
-    '''        TextView title = new TextView(this);
-        title.setText("Hva skal jeg se på?");
-        title.setTextSize(18f);
-        title.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        content.addView(title, matchWrap());
-
-        TextView text = bodyText(
-                "EMNE · AVSENDERNAVN · AVSENDERADRESSE · ALIAS\\n\\n" +
-                        "Dette er hovedsignalene. Velg deretter Samme spam, Annen spam eller Ikke spam. " +
-                        "Alle valg kan angres.");''',
-    "human help card",
+    '''                .append("Aliasvurdering: ").append(empty(candidate.aliasVerdict, "ukjent")).append('\\n')
+                .append("Aliasårsaker: ").append(empty(candidate.aliasReasons, "ingen")).append("\\n\\n")
+                .append("Spamgruppelikhet: ").append(percent(candidate.score)).append('\\n')''',
+    '''                .append("Aliasvurdering: ").append(empty(candidate.aliasVerdict, "ukjent")).append('\\n')
+                .append("Aliasårsaker: ").append(empty(candidate.aliasReasons, "ingen")).append("\\n\\n")
+                .append("SAMLET VURDERING\\n")
+                .append("Spamstøtte: ").append(percent(candidate.overallSpamSupport)).append('\\n')
+                .append("Legitimitetsstøtte: ").append(percent(candidate.overallHamSupport)).append('\\n')
+                .append("Resultat: ").append(candidate.overallVerdict).append('\\n')
+                .append("Årsaker: ").append(candidate.overallReasons.isEmpty()
+                        ? "ingen" : android.text.TextUtils.join(", ", candidate.overallReasons))
+                .append("\\n\\n")
+                .append("Spamgruppelikhet: ").append(percent(candidate.score)).append('\\n')''',
+    "show combined decision in technical details",
 )
 
 replace_once(
     activity,
-    '''        if (candidate.preview != null && !candidate.preview.trim().isEmpty()) {
-            TextView preview = bodyText(candidate.preview.trim());
-            preview.setMaxLines(3);
-            preview.setEllipsize(TextUtils.TruncateAt.END);
-            preview.setPadding(0, dp(10), 0, 0);
-            content.addView(preview, matchWrap());
-        }
-
-''',
-    '''''',
-    "remove preview from primary card",
+    '''    private String messageState(SpamFamilyLabRepository.Candidate candidate) {
+        if (candidate.explicitHam)
+            return "✓ Du har merket denne som IKKE SPAM";
+        if (candidate.confirmedThisFamily)
+            return "✓ Bekreftet spam i denne gruppen";
+        if (candidate.confirmedFamilyId != null)
+            return "✓ Bekreftet spam i en annen spamgruppe";
+        if (candidate.strong)
+            return "⚠ Sterkt spamtreff · trenger din kontroll";
+        return "Mulig spamtreff · trenger din kontroll";
+    }''',
+    '''    private String messageState(SpamFamilyLabRepository.Candidate candidate) {
+        if (candidate.explicitHam)
+            return "✓ Du har merket denne som IKKE SPAM";
+        if (candidate.confirmedThisFamily)
+            return "✓ Bekreftet spam i denne gruppen";
+        if (candidate.confirmedFamilyId != null)
+            return "✓ Bekreftet spam i en annen spamgruppe";
+        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.SUSPICIOUS)
+            return "⚠ Høy spamrisiko · trenger din kontroll";
+        if (candidate.overallVerdict == SpamDecisionScorer.Verdict.LIKELY_LEGIT)
+            return "✓ Sterke legitimitetssignaler · kontroller før du endrer";
+        return "Trenger din vurdering";
+    }''',
+    "human combined decision status",
 )
 
-replace_once(
-    activity,
-    '        Button details = secondaryButton("Tekniske detaljer");',
-    '        Button details = secondaryButton("Detaljer");',
-    "rename details button",
-)
-
-replace_once(
-    activity,
-    '''            LinearLayout actions = new LinearLayout(this);
-            actions.setOrientation(LinearLayout.HORIZONTAL);
-            actions.setPadding(0, dp(12), 0, 0);
-
-            Button same = actionButton(candidate.confirmedThisFamily ? "Samme spam ✓" : "Samme spam");
-            same.setEnabled(!candidate.confirmedThisFamily);
-            same.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: samme spam …",
-                    "Lagret som samme spam.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_SAME_SPAM, "Samme spam",
-                            () -> SpamFamilyLabRepository.confirmSpam(
-                                    getApplicationContext(), account.uuid,
-                                    group.family_id, candidate.messageId))));
-            actions.addView(same, weightedButton());
-
-            Button other = actionButton("Annen spam");
-            other.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: annen spam …",
-                    "Lagret som spam, men ikke denne spamgruppen.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_OTHER_SPAM, "Annen spam",
-                            () -> SpamFamilyLabRepository.markOtherSpam(
-                                    getApplicationContext(), account.uuid,
-                                    group.family_id, candidate.messageId))));
-            actions.addView(other, weightedButton());
-
-            Button legitimate = actionButton(candidate.explicitHam ? "Ikke spam ✓" : "Ikke spam");
-            legitimate.setEnabled(!candidate.explicitHam);
-            legitimate.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: ikke spam …",
-                    "Lagret som ikke spam.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_NOT_SPAM, "Ikke spam",
-                            () -> SpamFamilyLabRepository.markLegitimate(
-                                    getApplicationContext(), account.uuid, candidate.messageId))));
-            actions.addView(legitimate, weightedButton());
-
-            content.addView(actions, matchWrap());''',
-    '''            LinearLayout actions = new LinearLayout(this);
-            actions.setOrientation(LinearLayout.VERTICAL);
-            actions.setPadding(0, dp(14), 0, 0);
-
-            Button same = primaryActionButton(candidate.confirmedThisFamily ? "Samme spam ✓" : "Samme spam");
-            same.setEnabled(!candidate.confirmedThisFamily);
-            same.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: samme spam …",
-                    "Lagret som samme spam.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_SAME_SPAM, "Samme spam",
-                            () -> SpamFamilyLabRepository.confirmSpam(
-                                    getApplicationContext(), account.uuid,
-                                    group.family_id, candidate.messageId))));
-            actions.addView(same, matchWrap());
-
-            LinearLayout secondaryActions = new LinearLayout(this);
-            secondaryActions.setOrientation(LinearLayout.HORIZONTAL);
-            secondaryActions.setPadding(0, dp(6), 0, 0);
-
-            Button other = actionButton("Annen spam");
-            other.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: annen spam …",
-                    "Lagret som spam, men ikke denne spamgruppen.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_OTHER_SPAM, "Annen spam",
-                            () -> SpamFamilyLabRepository.markOtherSpam(
-                                    getApplicationContext(), account.uuid,
-                                    group.family_id, candidate.messageId))));
-            secondaryActions.addView(other, weightedButton());
-
-            Button legitimate = actionButton(candidate.explicitHam ? "Ikke spam ✓" : "Ikke spam");
-            legitimate.setEnabled(!candidate.explicitHam);
-            legitimate.setOnClickListener(v -> runCandidateAction(
-                    account, group, candidate,
-                    "Lagrer: ikke spam …",
-                    "Lagret som ikke spam.",
-                    () -> SpamUndoManager.runMessageAction(
-                            getApplicationContext(), account.uuid,
-                            group.family_id, candidate.messageId,
-                            SpamUndoManager.ACTION_NOT_SPAM, "Ikke spam",
-                            () -> SpamFamilyLabRepository.markLegitimate(
-                                    getApplicationContext(), account.uuid, candidate.messageId))));
-            secondaryActions.addView(legitimate, weightedButton());
-
-            actions.addView(secondaryActions, matchWrap());
-            content.addView(actions, matchWrap());''',
-    "mobile decision hierarchy",
-)
-
-replace_once(
-    activity,
-    '''                .append("Unsubscribe: ").append(candidate.hasUnsubscribe ? "ja" : "nei");''',
-    '''                .append("Unsubscribe: ").append(candidate.hasUnsubscribe ? "ja" : "nei")
-                .append("\\n\\nForhåndsvisning:\\n")
-                .append(empty(candidate.preview, "(ingen)"));''',
-    "move preview into details",
-)
-
-replace_once(
-    activity,
-    '''    private Button secondaryButton(String text) {
-        Button button = actionButton(text);
-        button.setMinHeight(dp(42));
-        return button;
-    }
-''',
-    '''    private Button primaryActionButton(String text) {
-        Button button = actionButton(text);
-        button.setMinHeight(dp(56));
-        button.setTextSize(16f);
-        button.setTypeface(Typeface.DEFAULT, Typeface.BOLD);
-        return button;
-    }
-
-    private Button secondaryButton(String text) {
-        Button button = actionButton(text);
-        button.setMinHeight(dp(42));
-        return button;
-    }
-''',
-    "primary decision button",
-)
-
-print("PASS: polished Spam Control for fast human scanning")
+print("PASS: integrated combined alias and spam-group decision into Spam Control")
