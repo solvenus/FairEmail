@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 SNAP = (ROOT / 'app/src/main/java/eu/faircode/email/SpamLearningSnapshot.java').read_text(encoding='utf-8')
 UNDO = (ROOT / 'app/src/main/java/eu/faircode/email/SpamUndoManager.java').read_text(encoding='utf-8')
+RESET = (ROOT / 'app/src/main/java/eu/faircode/email/SpamResetManager.java').read_text(encoding='utf-8')
 DAO = (ROOT / 'app/src/main/java/eu/faircode/email/DaoSpamSnapshot.java').read_text(encoding='utf-8')
 MSGDAO = (ROOT / 'app/src/main/java/eu/faircode/email/DaoSpamMessage.java').read_text(encoding='utf-8')
 
@@ -50,7 +51,8 @@ require('SpamFamilyIdentity.globalMetaPrefix()' in SNAP,
 require('AliasCompromiseReviewStore.globalMetaPrefix()' in SNAP,
         'compromise-review metadata missing from global snapshot')
 
-# Reset clears learning in place.  It must never delete the canonical index.
+# Reset clears learning in place. The DAO may expose explicit account-deletion
+# maintenance, but reset/undo are forbidden from using it.
 for token in [
     'dao.resetAllSpamMessageLearning()',
     'dao.resetAllDeliveryLearning()',
@@ -62,8 +64,10 @@ for token in [
     require(token in SNAP, 'reset contract missing: ' + token)
 require('deleteAllSpamMessages' not in SNAP,
         'reset must never delete canonical spam_message rows')
-require('DELETE FROM spam_message' not in MSGDAO,
-        'canonical message DAO must not expose destructive index deletion')
+require('.deleteAccount(' not in SNAP and '.deleteAccount(' not in RESET and '.deleteAccount(' not in UNDO,
+        'reset/undo path must never delete canonical message index')
+require('UPDATE spam_message SET' in MSGDAO and 'int resetLearning' in MSGDAO,
+        'canonical message reset must clear learning in place')
 
 # Undo must restore snapshot before marking history as undone, then rescore.
 restore_pos = UNDO.find('SpamLearningSnapshot.restore(app, history.before_json)')
