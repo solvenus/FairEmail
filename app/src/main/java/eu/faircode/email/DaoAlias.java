@@ -54,16 +54,15 @@ public interface DaoAlias {
     int observeDelivery(String accountUuid, String address, long received);
 
     @Query("UPDATE alias SET" +
-            " spam_hits = spam_hits + 1," +
-            " last_spam = CASE WHEN last_spam IS NULL OR :received > last_spam THEN :received ELSE last_spam END" +
+            " spam_hits = MAX(0, spam_hits + :spamDelta)," +
+            " ham_hits = MAX(0, ham_hits + :hamDelta)," +
+            " last_spam = CASE WHEN :spamDelta > 0 AND (last_spam IS NULL OR :received > last_spam)" +
+            " THEN :received ELSE last_spam END," +
+            " last_ham = CASE WHEN :hamDelta > 0 AND (last_ham IS NULL OR :received > last_ham)" +
+            " THEN :received ELSE last_ham END" +
             " WHERE account_uuid = :accountUuid AND address = :address")
-    int observeSpam(String accountUuid, String address, long received);
-
-    @Query("UPDATE alias SET" +
-            " ham_hits = ham_hits + 1," +
-            " last_ham = CASE WHEN last_ham IS NULL OR :received > last_ham THEN :received ELSE last_ham END" +
-            " WHERE account_uuid = :accountUuid AND address = :address")
-    int observeHam(String accountUuid, String address, long received);
+    int adjustLabels(String accountUuid, String address,
+                     int spamDelta, int hamDelta, long received);
 
     @Query("UPDATE alias SET state = :state" +
             " WHERE account_uuid = :accountUuid AND address = :address")
@@ -83,4 +82,27 @@ public interface DaoAlias {
 
     @Query("DELETE FROM alias WHERE account_uuid = :accountUuid")
     int deleteAliases(String accountUuid);
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    long insertDelivery(EntityAliasDelivery delivery);
+
+    @Query("SELECT * FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId" +
+            " LIMIT 1")
+    EntityAliasDelivery getDelivery(String accountUuid, long messageId);
+
+    @Query("UPDATE alias_delivery SET folder_type = :folderType" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int setDeliveryFolder(String accountUuid, long messageId, String folderType);
+
+    @Query("UPDATE alias_delivery SET label = :label, family_id = :familyId" +
+            " WHERE account_uuid = :accountUuid AND message_id = :messageId")
+    int setDeliveryLabel(String accountUuid, long messageId, int label, Long familyId);
+
+    @Query("SELECT COUNT(*) FROM alias_delivery" +
+            " WHERE account_uuid = :accountUuid AND address = :address")
+    int countDeliveries(String accountUuid, String address);
+
+    @Query("DELETE FROM alias_delivery WHERE account_uuid = :accountUuid")
+    int deleteDeliveries(String accountUuid);
 }
