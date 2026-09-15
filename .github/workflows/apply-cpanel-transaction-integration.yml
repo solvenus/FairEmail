@@ -1,0 +1,39 @@
+name: Apply cPanel transaction integration
+
+on:
+  push:
+    branches:
+      - feature/spam-control-p0
+    paths:
+      - '.github/scripts/patch_cpanel_transaction_integration.py'
+      - '.github/workflows/apply-cpanel-transaction-integration.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Apply fail-closed cPanel transaction integration
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_cpanel_transaction_integration.py
+          git diff --check
+          git status --short
+      - name: Commit and rebase safely
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/src/main/java/eu/faircode/email/CpanelAliasActuator.java \
+                  app/src/main/java/eu/faircode/email/ActivitySpamControl.java
+          git diff --cached --quiet && { echo "No patch changes"; exit 0; }
+          git commit -m "Integrate transactional cPanel alias burn"
+          git fetch origin feature/spam-control-p0
+          git rebase origin/feature/spam-control-p0
+          git push origin HEAD:feature/spam-control-p0
