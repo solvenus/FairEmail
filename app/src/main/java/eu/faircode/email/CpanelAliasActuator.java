@@ -9,6 +9,7 @@ package eu.faircode.email;
     (at your option) any later version.
 */
 
+import android.content.Context;
 import android.net.Uri;
 import android.text.TextUtils;
 
@@ -42,16 +43,26 @@ public final class CpanelAliasActuator implements AliasServerActuator {
     private static final int CONNECT_TIMEOUT = 15_000;
     private static final int READ_TIMEOUT = 20_000;
 
+    private final Context context;
     private final Config config;
     private final boolean allowUnsafeBurn;
 
     public CpanelAliasActuator(Config config) {
-        this(config, false);
+        this(null, config, false);
     }
 
     public CpanelAliasActuator(Config config, boolean allowUnsafeBurn) {
+        this(null, config, allowUnsafeBurn);
+    }
+
+    public CpanelAliasActuator(Context context, Config config) {
+        this(context, config, false);
+    }
+
+    public CpanelAliasActuator(Context context, Config config, boolean allowUnsafeBurn) {
         if (config == null)
             throw new IllegalArgumentException("config");
+        this.context = context == null ? null : context.getApplicationContext();
         this.config = config;
         this.allowUnsafeBurn = allowUnsafeBurn;
     }
@@ -246,8 +257,11 @@ public final class CpanelAliasActuator implements AliasServerActuator {
                 builder.appendQueryParameter(entry.getKey(), entry.getValue());
 
         HttpURLConnection connection = null;
+        String endpoint = builder.build().toString();
+        SpamControlLog.i(context, "CPANEL",
+                "REQUEST " + module + "/" + function + " endpoint=" + endpoint);
         try {
-            URL url = new URL(builder.build().toString());
+            URL url = new URL(endpoint);
             connection = (HttpURLConnection) url.openConnection();
             connection.setRequestMethod("GET");
             connection.setConnectTimeout(CONNECT_TIMEOUT);
@@ -266,13 +280,30 @@ public final class CpanelAliasActuator implements AliasServerActuator {
             if (TextUtils.isEmpty(body))
                 throw new IOException("cPanel empty response HTTP " + code);
 
-            JSONObject root = new JSONObject(body);
+            JSONObject root;
+            try {
+                root = new JSONObject(body);
+            } catch (JSONException ex) {
+                SpamControlLog.e(context, "CPANEL",
+                        "RESPONSE HTTP " + code + " final=" + connection.getURL() +
+                                " contentType=" + connection.getContentType() +
+                                " non-json-body=" + SpamControlLog.sanitize(body), ex);
+                throw new IOException("cPanel returned non-JSON HTTP " + code +
+                        " from " + connection.getURL(), ex);
+            }
+
+            SpamControlLog.i(context, "CPANEL",
+                    "RESPONSE HTTP " + code + " final=" + connection.getURL() +
+                            " contentType=" + connection.getContentType() +
+                            " topLevel=" + topLevelKeys(root) +
+                            " body=" + SpamControlLog.sanitize(body));
+
             if (code < 200 || code >= 300)
                 throw new IOException("cPanel HTTP " + code + ": " + apiError(root));
 
             JSONObject result = root.optJSONObject("result");
             if (result == null)
-                throw new IOException("cPanel response missing result");
+                throw new IOException(unexpectedResponseShape(root, connection.getURL().toString()));
             if (result.optInt("status", 0) != 1)
                 throw new IOException("cPanel UAPI failure: " + apiError(root));
 
@@ -281,6 +312,28 @@ public final class CpanelAliasActuator implements AliasServerActuator {
             if (connection != null)
                 connection.disconnect();
         }
+    }
+
+    private static String topLevelKeys(JSONObject root) {
+        if (root == null)
+            return "[]";
+        JSONArray names = root.names();
+        return names == null ? "[]" : names.toString();
+    }
+
+    private static String unexpectedResponseShape(JSONObject root, String endpoint) {
+        String keys = topLevelKeys(root);
+        if (root != null && root.has("cpanelresult"))
+            return "cPanel returned legacy API2 wrapper (cpanelresult), not UAPI result. " +
+                    "Check that Base URL is the cPanel service root, normally https://server:2083. " +
+                    "endpoint=" + endpoint + " topLevel=" + keys;
+        if (root != null && root.has("metadata") && root.has("data"))
+            return "cPanel returned WHM/API response shape, not cPanel UAPI. " +
+                    "Use the cPanel service/port (normally :2083), not WHM (:2087). " +
+                    "endpoint=" + endpoint + " topLevel=" + keys;
+        return "cPanel UAPI response missing result. endpoint=" + endpoint +
+                " topLevel=" + keys + " response=" +
+                SpamControlLog.sanitize(root == null ? "null" : root.toString());
     }
 
     private static JSONArray getDataArray(JSONObject root) {
@@ -393,7 +446,7 @@ public final class CpanelAliasActuator implements AliasServerActuator {
                 : ex.getClass().getSimpleName() + ": " + String.valueOf(ex.getMessage());
         value = value.replaceAll("(?i)(authorization|token|password)\\s*[:=]\\s*[^\\s,;]+", "$1=<redacted>");
         value = value.replace('\n', ' ').replace('\r', ' ').trim();
-        return value.length() <= 300 ? value : value.substring(0, 300);
+        return value.length() <= 1200 ? value : value.substring(0, 1200);
     }
 
     private static boolean isFail(String destination) {
