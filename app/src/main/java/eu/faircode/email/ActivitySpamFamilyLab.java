@@ -61,10 +61,14 @@ public class ActivitySpamFamilyLab extends ActivityBase {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
-        getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-        getSupportActionBar().setSubtitle("Spam Family Lab");
-
+        // ActivityBase creates and installs FairEmail's toolbar from setContentView.
+        // Configure the ActionBar only after that has happened.
         setContentView(buildUi());
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            getSupportActionBar().setSubtitle("Spam Family Lab");
+        }
+
         loadAccounts();
     }
 
