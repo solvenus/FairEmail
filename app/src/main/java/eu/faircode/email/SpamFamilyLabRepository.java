@@ -268,6 +268,11 @@ public final class SpamFamilyLabRepository {
         public final String aliasVerdict;
         public final String aliasReasons;
 
+        public final double overallSpamSupport;
+        public final double overallHamSupport;
+        public final SpamDecisionScorer.Verdict overallVerdict;
+        public final List<String> overallReasons;
+
         public final Double score;
         public final Double raw;
         public final Double text;
@@ -302,6 +307,10 @@ public final class SpamFamilyLabRepository {
                           Double aliasHamSupport,
                           String aliasVerdict,
                           String aliasReasons,
+                          double overallSpamSupport,
+                          double overallHamSupport,
+                          SpamDecisionScorer.Verdict overallVerdict,
+                          List<String> overallReasons,
                           Double score,
                           Double raw,
                           Double text,
@@ -334,6 +343,10 @@ public final class SpamFamilyLabRepository {
             this.aliasHamSupport = aliasHamSupport;
             this.aliasVerdict = aliasVerdict;
             this.aliasReasons = aliasReasons;
+            this.overallSpamSupport = overallSpamSupport;
+            this.overallHamSupport = overallHamSupport;
+            this.overallVerdict = overallVerdict;
+            this.overallReasons = overallReasons;
             this.score = score;
             this.raw = raw;
             this.text = text;
@@ -373,6 +386,20 @@ public final class SpamFamilyLabRepository {
             int aliasState = alias == null || alias.state == null
                     ? EntityAlias.STATE_ACTIVE : alias.state;
 
+            SpamDecisionScorer.ExplicitLabel explicitLabel;
+            if (delivery.label == EntityAliasDelivery.LABEL_SPAM)
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.SPAM;
+            else if (delivery.label == EntityAliasDelivery.LABEL_HAM)
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.HAM;
+            else
+                explicitLabel = SpamDecisionScorer.ExplicitLabel.UNKNOWN;
+
+            SpamDecisionScorer.Result overall = SpamDecisionScorer.score(
+                    explicitLabel,
+                    delivery.family_score,
+                    delivery.spam_support == null ? 0.0 : delivery.spam_support,
+                    delivery.ham_support == null ? 0.0 : delivery.ham_support);
+
             return new Candidate(
                     delivery.message_id,
                     delivery.received,
@@ -396,6 +423,10 @@ public final class SpamFamilyLabRepository {
                     delivery.ham_support,
                     delivery.traffic_verdict,
                     delivery.traffic_reasons,
+                    overall.spamSupport,
+                    overall.hamSupport,
+                    overall.verdict,
+                    overall.reasons,
                     selectedScore,
                     predictedThisFamily ? delivery.family_score_raw : null,
                     predictedThisFamily ? delivery.family_text : null,
